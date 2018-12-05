@@ -1,0 +1,11 @@
+channels:
+  - conda-forge
+dependencies:
+  - appmode
+  - pip:
+    - pandas
+    - matplotlib
+    - numpy
+    - seaborn
+    - statsmodels
+    - simple-crypt
