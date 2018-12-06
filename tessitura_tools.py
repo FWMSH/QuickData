@@ -809,8 +809,9 @@ def create_sales_chart(*args,
     if len(filename) > 0:
         plt.savefig(filename, dpi=300, bbox_inches='tight')
      
-    #plt.show()
-    return(plt.gcf())
+    fig = plt.gcf()
+    plt.close()
+    return(fig)
     
 def create_projection_chart(data, model, name, perf_date,
                             filename='',
