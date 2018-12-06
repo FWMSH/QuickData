@@ -12,6 +12,8 @@ def set_plot_size(w,h, *args, **kwargs):
     
     # Function to set the size of a plot
     
+    sb.set_context('poster', font_scale=0.5)
+    sb.set_palette('colorblind')
     plt.rcParams["figure.figsize"] = [w,h]
 
 
