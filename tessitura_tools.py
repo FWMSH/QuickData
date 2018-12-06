@@ -14,6 +14,7 @@ def set_plot_size(w,h, *args, **kwargs):
     
     sb.set_context('poster', font_scale=0.5)
     sb.set_palette('colorblind')
+    sb.set_style('darkgrid')
     plt.rcParams["figure.figsize"] = [w,h]
 
 
