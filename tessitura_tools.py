@@ -3,9 +3,17 @@ import datetime
 import numpy as np
 import seaborn as sb
 from statsmodels import robust
+import matplotlib as mpl
 from matplotlib import pyplot as plt
 import time
 import glob
+
+def set_plot_size(w,h, *args, **kwargs):
+    
+    # Function to set the size of a plot
+    
+    plt.rcParams["figure.figsize"] = [w,h]
+
 
 def load_data(path):
     # This function loads the Tessitura data from stored files. path specifies
@@ -691,7 +699,10 @@ def create_revenue_chart(df, *args,
         if filename != '':
             plt.savefig(filename, dpi=300, bbox_inches='tight')
 
-        return(plt.gcf())
+        fig = plt.gcf()
+        plt.close()
+        
+        return(fig)
 
 def create_tickets_chart(df, *args, 
                          filename='',
@@ -714,7 +725,9 @@ def create_tickets_chart(df, *args,
         if filename != '':
             plt.savefig(filename, dpi=300, bbox_inches='tight')
             
-        return(plt.gcf())
+        fig = plt.gcf()
+        plt.close()
+        return(fig)
 
 def create_sales_chart(*args,
                        title='',
