@@ -7,6 +7,7 @@ import matplotlib as mpl
 from matplotlib import pyplot as plt
 import time
 import glob
+#from numba import jit
 
 def set_plot_size(w,h, *args, **kwargs):
     
@@ -104,7 +105,7 @@ def add_venue(df):
                  'Rolling Stones at the Max', 'Journey to the South Paci',
                  'Born to be Wild', 'Dinosaurs Alive', 'D-Day: Normandy 1944',
                  'Backyard Wilderness', 'National Parks Adventure',
-                 'The Polar Express', 'Omni Admission']
+                 'The Polar Express', 'Omni Admission', 'Moana']
     omni = df.loc[df['Description'].isin(omni_list)]
     venues[omni.index] = 'Omni'
     studios_list = ['Science on Tap', "FAMapalooza", 'Birthday Parties',
@@ -221,9 +222,11 @@ def add_attach(to_add, all_data):
         str_dates = to_add['Perf date'].dt.strftime("%Y-%m-%d")
 
         # Pre-compute the attendance for each day in question
+        #t1 = time.time()
         for str_date in str_dates.unique():
             admis = get_performance(all_data,'General Admission', str_date)['Tickets'].sum()
             admis_dict[str_date] = admis
+        #print(time.time() - t1)
         
         attach = list()
         for i in range(len(to_add)):    
@@ -489,8 +492,7 @@ def get_sales_curve(data, name, perf_date, max_tickets=0, end_on_event=False):
     else:
         frac_sum = cumsum/max_tickets
 
-    #diff = orders.reset_index()
-    diff = orders.reset_index()['Order date'].sub(pd.to_datetime(perf_date))/np.timedelta64(1, 'D')
+    diff = orders.reset_index()['Order date'].sub(perf_date)/np.timedelta64(1, 'D')
 
     result = pd.DataFrame()
     result['Days before'] = diff.values
@@ -503,11 +505,13 @@ def get_sales_curve(data, name, perf_date, max_tickets=0, end_on_event=False):
     
     return(result)
 
-def create_presale_model(data, curve_list):
+def create_presale_model(data, curve_list, new_err=False, verbose=False):
     
     # Function to create a model of how future presales might
     # look based on the sales curves of past events. curve_list 
     # is an array of lists of the format [(name, date), (name2, date2), ...]
+    # Set new_err=True to compute a potentially-better error estimation, which
+    # is much slower
     
     # Fetch the sales curve for each event
     curves = list()
@@ -531,25 +535,24 @@ def create_presale_model(data, curve_list):
     # Compute robust statistics 
     mad_by_day = np.zeros(len(collapsed))
     med_by_day = np.zeros(len(collapsed))
-    for i in range(len(collapsed)):
-        day = collapsed['Days before'].iloc[i]
+    for row in collapsed.iterrows():
+        day = (row[1])['Days before']
         dslice = combo[combo['Days before'] == day]
         med_by_day[i] = dslice['Frac sold'].median()
         mad_by_day[i] = robust.mad(dslice['Frac sold'].values)
- 
     # Finalize columns
     collapsed['Frac sold'] = med_by_day
     collapsed['Uncertainty'] = mad_by_day # median absolute deviation estimating the stdev
     
-    # New error estimation
-    
-    err = np.zeros((len(fixed_curves),len(max_index)))
-    for i in range(len(fixed_curves)):
-        for j in np.arange(1,len(max_index)):
-            err[i,j-1] = abs((project_sales(data, collapsed, (fixed_curves[i])['Total tickets'].values[-j], (fixed_curves[i])['Days before'].values[-j], verbose=False)[0] - (fixed_curves[i])['Total tickets']).values[-1])/(fixed_curves[i])['Total tickets'].values[-1]
+    # New error estimation    
+    if new_err:
+        err = np.zeros((len(fixed_curves),len(max_index)))
+        for i in range(len(fixed_curves)):
+            for j in np.arange(1,len(max_index)):
+                err[i,j-1] = abs((project_sales(data, collapsed, (fixed_curves[i])['Total tickets'].values[-j], (fixed_curves[i])['Days before'].values[-j], verbose=False)[0] - (fixed_curves[i])['Total tickets']).values[-1])/(fixed_curves[i])['Total tickets'].values[-1]
 
-    err_90 = np.percentile(err, 80, axis=0)
-    collapsed['New error'] = np.flip(err_90,axis=0)
+        err_90 = np.percentile(err, 80, axis=0)
+        collapsed['New error'] = np.flip(err_90,axis=0)
     collapsed = collapsed.drop(['Tickets', 'Total tickets'], axis=1)
 
     return(collapsed)
@@ -559,6 +562,12 @@ def project_sales(data, model, input1, input2, max_tickets=0, verbose=True, new_
     # Function to project how many tickets will ultimately be sold given
     # the number currently sold, the time to the event, and a presale
     # model.
+    
+    # If we want new_err, make sure our model has new_err in it:
+    if new_err:
+        if not 'New error' in model:
+            print('Error: model must be computed with new_err=True')
+            return((0,0,0))
     if isinstance(input1, str):
         # We were passed a ('name', 'date') combo
         curve = get_sales_curve(data, input1, input2)
@@ -568,8 +577,7 @@ def project_sales(data, model, input1, input2, max_tickets=0, verbose=True, new_
         # We were passed a (sold, days_out) combo
         sold = input1
         days_out = input2
-
-    
+            
     # We index with negative numbers
     if days_out > 0:
         days_out = -days_out
@@ -639,6 +647,7 @@ def project_sales_path(data, model, sold, days_out, max_tickets=0, full=False):
     else:
         day_index = np.where(model['Days before'].values == days_out)[0]
         return(model['Days before'].values[day_index[0]:], path.values[day_index[0]:])
+
 
 def create_model_chart(data, curve_list, filename='', active=[], simple=False, title=''):
     
