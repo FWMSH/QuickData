@@ -275,7 +275,7 @@ def search(data, name='', date='', time='', venue='', audience='',
         else:
             data = data[data['Description'].str.lower().str.contains(name.lower())]
    
-    if len(date) > 0: # We were passed a date string
+    if len(date) > 0: # We were passed a date 
         if isinstance(date, str):
             date = date.lower()
         
@@ -321,7 +321,9 @@ def search(data, name='', date='', time='', venue='', audience='',
                     if (date[0] == date[1]) or (date[1] == None):
                         data = data[data['Perf date'].dt.date == date[0]]
                     else:   
-                        data = data[(data['Perf date'] >= min(date)) & (data['Perf date'] <= max(date))]          
+                        min_date = min(date)
+                        max_date = max(date) + pd.to_timedelta('1 day') # Add day to that all times on the given day pass > or <
+                        data = data[(data['Perf date'] >= min_date) & (data['Perf date'] <= max_date)]          
 
     if weekday:
         data = data[data['Perf date'].dt.weekday < 5]
