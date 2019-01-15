@@ -375,7 +375,7 @@ def search(data, name='', date='', time='', venue='', audience='',
     #    print(data['Description'].unique())
         
     if group != '':
-        if group.lower() in ['d', 'm', 'y']:
+        if group.lower() in ['d', 'w', 'm', 'y', 'a-sep']:
             data = data.set_index('Perf date').groupby(pd.Grouper(freq=group)).sum().reset_index()
         elif group.lower() == 'show':
             data = data.groupby(['Description']).sum().reset_index()
