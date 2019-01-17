@@ -350,10 +350,13 @@ def search(data, name='', date='', time='', venue='', audience='',
             data = data[data['Perf date'].dt.time == time_param.time()]    
     
     if len(tickets) > 0:    
-        if tickets[0] == '>':
-            data = data[data['Tickets'] > int(tickets[1:])]
-        elif tickets[0] == '<':
-            data = data[data['Tickets'] < int(tickets[1:])]
+        # Format is (min:max)
+        split = tickets.split(':')
+        split = [x.strip() for x in split]
+        if split[0] != '':
+            data = data[data['Tickets'] >= float(split[0])]
+        if split[1] != '':
+            data = data[data['Tickets'] <= int(split[1])]
 
     if len(revenue) > 0:    
         if revenue[0] == '>':
