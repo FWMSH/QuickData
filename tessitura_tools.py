@@ -358,11 +358,14 @@ def search(data, name='', date='', time='', venue='', audience='',
         if split[1] != '':
             data = data[data['Tickets'] <= int(split[1])]
 
-    if len(revenue) > 0:    
-        if revenue[0] == '>':
-            data = data[data['Revenue'] > float(revenue[1:])]
-        elif revenue[0] == '<':
-            data = data[data['Revenue'] < float(revenue[1:])]
+    if len(revenue) > 0:   
+        # Format is (min:max)    
+        split = revenue.split(':')
+        split = [x.strip() for x in split]
+        if split[0] != '':
+            data = data[data['Revenue'] >= float(split[0])]
+        if split[1] != '':
+            data = data[data['Revenue'] <= int(split[1])]
 
     if day_of_week >= 0:
         data = data[data['Perf date'].dt.weekday == int(day_of_week)]
