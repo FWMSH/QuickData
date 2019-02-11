@@ -472,7 +472,7 @@ def get_pricing_data(data):
     overlap_check = pd.Series(to_match).isin(tt_pricetype['ttCode'])
     if min(overlap_check) is False:
         problem = (df[df['ttCode'].isin(to_match[~overlap_check])])[['Description','Perf date']]
-        print('Warning: Price type data does not cover every row. This usually means there are dates in the input data not included in the price type data. Rows missing: ' + str(len(problem)))
+        print('Warning: Price type data does not cover every row. Data can be unreliable for special events and is only updated monthly. Rows missing: ' + str(len(problem)))
     
     result = tt_pricetype[tt_pricetype['ttCode'].isin(to_match)]
     return(result.drop(['ttCode'], axis=1))
