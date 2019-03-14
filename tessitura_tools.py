@@ -108,7 +108,7 @@ def add_venue(df):
                  'Born to be Wild', 'Dinosaurs Alive', 'D-Day: Normandy 1944',
                  'Backyard Wilderness', 'National Parks Adventure', 'Frozen',
                  'The Polar Express', 'Omni Admission', 'Moana',
-                 'Superpower Dogs']
+                 'Superpower Dogs', 'Under the Sea', 'Apollo 11']
     omni = df.loc[df['Description'].isin(omni_list)]
     venues[omni.index] = 'Omni'
     studios_list = ['Science on Tap', "FAMapalooza", 'Birthday Parties',
@@ -136,8 +136,7 @@ def add_audience(df):
     # no_school days are weekdays when we're on a public schedule
     no_school = pd.to_datetime(['2018-03-12', '2018-03-13', '2018-03-14', '2018-03-15', '2018-03-16',
                  '2018-01-02', '2018-01-03', '2018-01-04', '2018-01-05', '2018-01-15',
-                 '2018-05-28', '2018-09-03', '2018-09-10', '2018-01-01', '2018-10-08', '2018-11-23',
-                 '2018-11-19', '2018-11-20', '2018-11-21', '2018-11-23'])
+                 '2018-05-28', '2018-09-03', '2018-09-10', '2018-01-01', '2018-10-08', '2018-11-23', '2018-11-19', '2018-11-20', '2018-11-21', '2018-11-23', '2019-03-11', '2019-03-12', '2019-03-13', '2019-03-14', '2019-03-15'])
 
     # This is all the weekdays within the general range of the school year
     school_dates = pd.bdate_range('2018-01-02', '2018-05-31').union(pd.bdate_range('2018-09-04', '2018-12-21')).union(pd.bdate_range('2019-02-12', '2019-05-31'))
@@ -451,9 +450,6 @@ def get_group_data(data):
 def get_member_data(data):
     
     # Function to return the number and fraction of tickets sold to members.
-    # Make sure we have some data
-    if len(data) == 0:
-        return(pd.DataFrame())
     
     df = data.copy()
     if 'Price type' in data: # Need the DataFrame to include princing info
@@ -478,7 +474,6 @@ def get_member_data(data):
         result['Guest tickets'] = guest_data.sum()['Tickets']
         result['Guest revenue'] = guest_data.sum()['Revenue']
         result['Member fraction'] = np.round(result['Member tickets']/(result['Member tickets'] + result['Guest tickets']),3)
-       
         return(result)      
     
     else: # Retreive the proper DataFrame and call this function recursively
@@ -770,11 +765,18 @@ def summarize_day(data, date, verbose=True):
     return(result.sort_values(['Venue', 'Perf date']))
        
         
-def get_sales_curve(data, name, perf_date, max_tickets=0, end_on_event=False):
+def get_sales_curve(data, 
+                    name, 
+                    perf_date, 
+                    max_tickets=0, 
+                    end_on_event=False,
+                    pad=False):
     
-    # Function to return a cumulative distribution of sales for a show
-    # set end_on_event=True to truncate the sales curve on the day of the 
-    # event.
+    # Function to return a cumulative distribution of sales for a show.
+    # Set end_on_event=True to truncate the sales curve on the day of the 
+    # event. Set pad=True to fill values up until the previous day (useful
+    # if you're making a projection chart and there haven't been sales for 
+    # several days)
     
     if isinstance(perf_date, str):
         perf_date = pd.to_datetime(perf_date)
@@ -786,7 +788,17 @@ def get_sales_curve(data, name, perf_date, max_tickets=0, end_on_event=False):
         return(pd.DataFrame())
         
     # This useless-seeming line adds rows where we have a missing date
-    orders = orders.set_index('Order date').groupby(pd.Grouper(freq='d')).sum()
+    orders = orders.set_index('Order date').groupby(pd.Grouper(freq='d')).sum().reset_index()
+
+    # Optionally pad with zero sales for days between the last ticket sale and the current date.
+    if pad:
+        yesterday = datetime.date.today() - datetime.timedelta(1)
+        new_index = pd.date_range(orders['Order date'].iloc[-1] + datetime.timedelta(1), yesterday)
+        extension = pd.DataFrame()
+        extension['Order date'] = new_index
+        extension['Tickets'] = 0
+        extension['Revenue'] = 0
+        orders = orders.append(extension)
     
     cumsum = orders.Tickets.cumsum()
     if max_tickets == 0:
@@ -1178,11 +1190,14 @@ def create_sales_chart(*args,
 def create_projection_chart(data, model, name, perf_date,
                             filename='',
                             max_tickets=0, 
+                            pad=True,
                             simple=False,
                             title=''):
     
     # Function to create a chart that plots the past and predicted sales
-    # for a given event.
+    # for a given event. Set simple=True to supress the display of daily
+    # projections. Set pad=True to extend projected data through yesterday
+    # (useful if there haven't been any ticket sales in several days)
     
     # Clear the current figure
     plt.clf()
@@ -1199,7 +1214,7 @@ def create_projection_chart(data, model, name, perf_date,
     sb.set_context('poster')
     pal = sb.color_palette('colorblind')
     
-    perf_curve = get_sales_curve(data, name, perf_date, max_tickets=max_tickets)
+    perf_curve = get_sales_curve(data, name, perf_date, max_tickets=max_tickets, pad=pad)
     
     if len(perf_curve) == 0:
         # Performance not found
