@@ -10,3 +10,4 @@ dependencies:
     - statsmodels
     - simple-crypt
     - openpyxl
+    - scipy

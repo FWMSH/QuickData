@@ -3,6 +3,7 @@ import datetime
 import numpy as np
 import seaborn as sb
 from statsmodels import robust
+from scipy.optimize import curve_fit
 import matplotlib as mpl
 from matplotlib import pyplot as plt
 import time
@@ -866,21 +867,85 @@ def create_presale_model(data, curve_list, new_err=False):
         for i in range(len(fixed_curves)):
             for j in np.arange(1,len(max_index)):
                 err[i,j-1] = abs((project_sales(data, collapsed, (fixed_curves[i])['Total tickets'].values[-j], (fixed_curves[i])['Days before'].values[-j], verbose=False)[0] - (fixed_curves[i])['Total tickets']).values[-1])/(fixed_curves[i])['Total tickets'].values[-1]
-
-        err_90 = np.percentile(err, 80, axis=0)
-        collapsed['New error'] = np.flip(err_90,axis=0)
+        
+        err_80 = np.percentile(err, 80, axis=0)
+        collapsed['New error'] = np.flip(err_80,axis=0)
     collapsed = collapsed.drop(['Tickets', 'Total tickets'], axis=1)
     return(collapsed)
 
-def project_sales(data, model, input1, input2, max_tickets=0, verbose=True, new_err=False):
+def project_sales_with_fit(data, model, name, date,
+                           day=1000, max_tickets=0, verbose=True):
+
+    # This function projects sales by fitting the model to the sales path
+    # so far. It's a bit slower than project_sales, and *much* slower if
+    # the model must also be computed (requires new_err).
+    # If day != 1000, the projection will be based only on days up to that day (used when making the projection graph).
     
+    if isinstance(model, str):
+        model = data.tt.get_model(model, new_err=True)
+    else: 
+        pass # Hopefully we have been passed a model DataFrame
+    
+    sales_path = data.tt.get_sales_curve(name, date, end_on_event=True)
+    if day != 1000:
+        day = min(day, -1*day) # Index with negative numbers
+        sales_path = sales_path[sales_path['Days before'] <= day]
+        if len(sales_path) == 0:
+            if verbose:
+                print('project_sales_with_fit: error: no data prior to specified day')
+            return(max_tickets/2, 0, max_tickets)
+    
+    df1 = sales_path.copy()
+    df2 = model.copy()
+    df1 = df1.set_index('Days before')
+    df2 = df2.set_index('Days before')
+    df2['Frac expected'] = df2['Frac sold']
+    df2 = df2.drop(['Frac sold', 'Uncertainty'], axis=1)
+    
+    combo = pd.concat([df1, df2], axis=1).reset_index().dropna()
+    
+    # Log weights to add weight to recent observations
+    weights = np.logspace(0,-2,len(combo))
+    if len(combo) == 0:
+        if verbose:
+            print('project_sales_with_fit: error: not enough data!')
+        proj = max_tickets/2
+        low = 0
+        high = max_tickets
+    else:
+        fit = curve_fit(_f, combo['Frac expected'].values, combo['Total tickets'].values, sigma=weights, absolute_sigma=True)
+    
+        proj = fit[0]*model['Frac sold'].iloc[-1]
+        low = proj - proj*combo['New error'].iloc[-1]
+        high = proj + proj*combo['New error'].iloc[-1]
+    
+    if (max_tickets > 0):
+        if proj > max_tickets:
+            proj = max_tickets
+        if high > max_tickets:
+            high = max_tickets
+    
+    if low < (sales_path.iloc[-1])['Total tickets']:
+        low = (sales_path.iloc[-1])['Total tickets']
+    
+    return((np.round(np.squeeze(proj),0), np.round(np.squeeze(low),0), np.round(np.squeeze(high),0)))
+    
+def _f(model, scalar):
+    
+    # This stub function is used in curve fitting as part of project_sales_with_fit
+    # model must be a numpy array, not a pandas series.
+    
+    return scalar*model
+    
+def project_sales(data, model, input1, input2, max_tickets=0, verbose=True, new_err=False):
+
     # Function to project how many tickets will ultimately be sold given
     # the number currently sold, the time to the event, and a presale
     # model.
     
     # Create the model, if it's not passed directly in
     if isinstance(model, str): # We were passed a string shorthand
-        model = get_model(data, model)
+        model = get_model(data, model, new_err=new_err)
     elif isinstance(model, list): # We were passed a list of peformances
         model = create_presale_model(data, model, new_err=new_err)
     else: # We were hopefully passed a DataFrame containing the model directly!
@@ -947,17 +1012,35 @@ def project_sales(data, model, input1, input2, max_tickets=0, verbose=True, new_
 
         return(proj, low, high)
     
-def project_sales_path(data, model, sold, days_out, max_tickets=0, full=False):
+def project_sales_path(data, model, input1, input2, 
+                       max_tickets=0, full=False):
     # Function to project what the sales path should look like
     # going forward. This takes into account the possibility
     # of a sellout. 
     # model is the sales model to use
-    # sold is the number of tickets sold on day "days_out"
     # max=0 means the number of sales is unbounded
     # full=True means the path will include every day in the model,
     # rather than just from "days_out"
+    #
+    # For the "dumb" projection, pass input1 as int(sales) and input2 as int(days_out)
+    # For the "smart" projection, which uses a fit, pass input1 as str(name), input2 as str(date), and a model with new_err=True
+    # The "dumb" approach is much faster
     
-    proj, low, high = project_sales(data, model, sold, days_out, max_tickets=0)
+    if isinstance(input1, str) and isinstance(input2, str):
+        fit = True
+    elif isinstance(input1, int) and isinstance(input2, int):
+        fit = False
+    else:
+        print('project_sales_path: error: must pass either name/date as string or sold/days_out as int')
+        return()
+    
+    if fit:
+        sales_curve = get_sales_curve(data, input1, input2)
+        days_out = (sales_curve.iloc[-1])['Days before']
+        proj, low, high = project_sales_with_fit(data, model, input1, input2, max_tickets=0)
+    else:
+        days_out = min(input2, -1*input2) # Want the negative version
+        proj, low, high = project_sales(data, model, input1, input2, max_tickets=0)
     
     path = proj*model['Frac sold']
     # correct for a sellout
@@ -970,7 +1053,7 @@ def project_sales_path(data, model, sold, days_out, max_tickets=0, full=False):
         day_index = np.where(model['Days before'].values == days_out)[0]
         return(model['Days before'].values[day_index[0]:], path.values[day_index[0]:])
 
-def get_model(data, name, list=False):
+def get_model(data, name, list=False, new_err=False):
 
     # Function to return a pre-defined sales model by name. Setting
     # list=True returns the list of performances included in the 
@@ -1001,7 +1084,7 @@ def get_model(data, name, list=False):
         if list:
             return(models[name.lower()])
         else:
-            return(create_presale_model(data, models[name.lower()]))
+            return(create_presale_model(data, models[name.lower()], new_err=new_err))
     else:
         print('Model ' + name + ' not found.')
         if list:
@@ -1106,7 +1189,7 @@ def create_tickets_chart(df, *args,
 def create_sales_chart(*args,
                        title='',
                        frac=False,
-                       end_on_event=False,
+                       end_on_event=True,
                        filename='',
                        max_tickets=0):
     
@@ -1156,7 +1239,7 @@ def create_sales_chart(*args,
     # Recursively plot the curves
     if not frac: # We're plotting the total number of tickets
         for curve in curve_list:
-            temp = get_sales_curve(data, curve[0], curve[1])
+            temp = get_sales_curve(data, curve[0], curve[1], pad=True)
             plt.plot(temp['Days before'], temp['Total tickets'], label=curve[0] + ' ' + str(curve[1]))
             plt.ylabel('Tickets sold')
         
@@ -1169,9 +1252,13 @@ def create_sales_chart(*args,
             plt.plot(temp['Days before'], 100*temp['Frac sold'], label=curve[0] + ' ' + str(curve[1]))
             plt.ylabel('Percent of tickets sold')
     
-    plt.legend()
     plt.xlabel('Days until event')
     plt.title(title)
+    legend = plt.legend(frameon=1)
+    frame = legend.get_frame()
+    frame.set_color('white')
+    frame.set_facecolor('white')
+    frame.set_edgecolor('white')
     
     if end_on_event:
         left, right = plt.xlim()
@@ -1179,6 +1266,10 @@ def create_sales_chart(*args,
         
     if max_tickets > 0:
         plt.ylim(0, 1.05*max_tickets)
+    else:
+        axes = plt.gca()
+        autoy = axes.get_ylim()
+        plt.ylim(0, autoy[1])
     
     if len(filename) > 0:
         plt.savefig(filename, dpi=300, bbox_inches='tight')
@@ -1189,6 +1280,7 @@ def create_sales_chart(*args,
     
 def create_projection_chart(data, model, name, perf_date,
                             filename='',
+                            fit=True,
                             max_tickets=0, 
                             pad=True,
                             simple=False,
@@ -1198,41 +1290,60 @@ def create_projection_chart(data, model, name, perf_date,
     # for a given event. Set simple=True to supress the display of daily
     # projections. Set pad=True to extend projected data through yesterday
     # (useful if there haven't been any ticket sales in several days)
+    # If fit=True, the "smart" approach using fitting to determine sales
+    # projections is used. This is much slower, but should be more stable.
     
     # Clear the current figure
     plt.clf()
     
     # Create the model, if it's not passed directly in
     if isinstance(model, str): # We were passed a string shorthand
-        model = get_model(data, model)
+        model = get_model(data, model, new_err=fit)
     elif isinstance(model, list): # We were passed a list of peformances
-        model = create_presale_model(data, model, new_err=False)
+        model = create_presale_model(data, model, new_err=fit)
     else: # We were hopefully passed a DataFrame containing the model directly!
-        pass
+        if fit and ('New error' not in model):
+            print('create_projection_chart: error: if fit=True (default), model must be generated with new_err=True')
 
     # Set basic plot parameters
     sb.set_context('poster')
     pal = sb.color_palette('colorblind')
     
-    perf_curve = get_sales_curve(data, name, perf_date, max_tickets=max_tickets, pad=pad)
+    perf_curve = get_sales_curve(data, name, perf_date, max_tickets=max_tickets, pad=pad, end_on_event=True)
     
     if len(perf_curve) == 0:
         # Performance not found
         return
     
     if simple:
-        proj, low, high = project_sales(data, model, 
-                                            perf_curve['Total tickets'].iloc[-1], 
-                                            perf_curve['Days before'].iloc[-1], 
-                                            max_tickets=max_tickets, 
-                                            verbose=False)
+        if fit:
+            proj, low, high = project_sales_with_fit(data, model, 
+                                                            name, 
+                                                            perf_date, 
+                                                            max_tickets=max_tickets,
+                                                            verbose=False)
+        else:
+            proj, low, high = project_sales(data, model, 
+                                                perf_curve['Total tickets'].iloc[-1], 
+                                                perf_curve['Days before'].iloc[-1], 
+                                                max_tickets=max_tickets, 
+                                                verbose=False)
     else:
         for i in range(len(perf_curve)):
-            proj, low, high = project_sales(data, model, 
-                                            perf_curve['Total tickets'].iloc[i], 
-                                            perf_curve['Days before'].iloc[i], 
-                                            max_tickets=max_tickets, 
-                                            verbose=False)
+            if fit:
+                proj, low, high = project_sales_with_fit(data, model, 
+                                                            name, 
+                                                            perf_date,
+                                                            day=(perf_curve.iloc[i])['Days before'],
+                                                            max_tickets=max_tickets,
+                                                            verbose=False)
+            else:
+                proj, low, high = project_sales(data, model, 
+                                                    perf_curve['Total tickets'].iloc[i], 
+                                                    perf_curve['Days before'].iloc[i], 
+                                                    max_tickets=max_tickets, 
+                                                    verbose=False)
+                    
                                             
             plt.errorbar(perf_curve['Days before'].iloc[i], 
                          proj, yerr=np.array([[proj-low],[high-proj]]), 
@@ -1246,8 +1357,8 @@ def create_projection_chart(data, model, name, perf_date,
     else:
         full_bool = True
     path_days, path_proj = project_sales_path(data, model, 
-                                              perf_curve['Total tickets'].iloc[-1], 
-                                              perf_curve['Days before'].iloc[-1], 
+                                              int(perf_curve['Total tickets'].iloc[-1]), 
+                                              int(perf_curve['Days before'].iloc[-1]), 
                                               max_tickets=max_tickets, 
                                              full=full_bool)
     plt.plot(path_days, path_proj, 
@@ -1275,7 +1386,11 @@ def create_projection_chart(data, model, name, perf_date,
         plt.title(str(name) + ' ' + str(perf_date))
     else:
         plt.title(title)
-    plt.legend()    
+    legend = plt.legend(frameon=1)
+    frame = legend.get_frame()
+    frame.set_color('white')
+    frame.set_facecolor('white')
+    frame.set_edgecolor('white')
     
     if simple:
         # Add an explainer to the bottom of the chart
@@ -1349,6 +1464,9 @@ class ttAccessor(object):
     
     def project_sales(self, *args, **kwargs):
         return(project_sales(self._obj, *args, **kwargs))
+    
+    def project_sales_with_fit(self, *args, **kwargs):
+        return(project_sales_with_fit(self._obj, *args, **kwargs))
     
     def project_sales_path(self, *args, **kwargs):
         return(project_sales_path(self._obj, *args, **kwargs))    
