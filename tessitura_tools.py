@@ -109,7 +109,8 @@ def add_venue(df):
                  'Born to be Wild', 'Dinosaurs Alive', 'D-Day: Normandy 1944',
                  'Backyard Wilderness', 'National Parks Adventure', 'Frozen',
                  'The Polar Express', 'Omni Admission', 'Moana',
-                 'Superpower Dogs', 'Under the Sea', 'Apollo 11']
+                 'Superpower Dogs', 'Under the Sea', 'Apollo 11',
+                 'How To Train Your Dragon', 'The Secret Life of Pets', 'Fantastic Beasts']
     omni = df.loc[df['Description'].isin(omni_list)]
     venues[omni.index] = 'Omni'
     studios_list = ['Science on Tap', "FAMapalooza", 'Birthday Parties',
@@ -781,6 +782,8 @@ def get_sales_curve(data,
     
     if isinstance(perf_date, str):
         perf_date = pd.to_datetime(perf_date)
+    else:
+        pass # Hopefully we were passed a Datetime-like object
     
     orders = get_performance(data, name, perf_date)
     if len(orders) == 0:
@@ -790,7 +793,7 @@ def get_sales_curve(data,
         
     # This useless-seeming line adds rows where we have a missing date
     orders = orders.set_index('Order date').groupby(pd.Grouper(freq='d')).sum().reset_index()
-
+    
     # Optionally pad with zero sales for days between the last ticket sale and the current date.
     if pad:
         yesterday = datetime.date.today() - datetime.timedelta(1)
@@ -807,7 +810,7 @@ def get_sales_curve(data,
     else:
         frac_sum = cumsum/max_tickets
 
-    diff = orders.reset_index()['Order date'].sub(perf_date)/np.timedelta64(1, 'D')
+    diff = orders.reset_index()['Order date'].dt.date.sub(perf_date.date())/np.timedelta64(1, 'D')
 
     result = pd.DataFrame()
     result['Days before'] = diff.values
@@ -825,6 +828,7 @@ def create_presale_model(data, curve_list, new_err=False):
     # Function to create a model of how future presales might
     # look based on the sales curves of past events. curve_list 
     # is an list of tuples of the format [(name, date), (name2, date2), ...]
+    # that specifiy which past events to base the model on.
     # Set new_err=True to compute a potentially-better error estimation, which
     # is much slower
     
@@ -849,27 +853,41 @@ def create_presale_model(data, curve_list, new_err=False):
     
     # Compute robust statistics 
     mad_by_day = np.zeros(len(collapsed))
-    med_by_day = np.zeros(len(collapsed))
+    mean_by_day = np.zeros(len(collapsed))
     i = 0
     for row in collapsed.iterrows():
         day = (row[1])['Days before']
         dslice = combo[combo['Days before'] == day]
-        med_by_day[i] = dslice['Frac sold'].median()
+        mean_by_day[i] = dslice['Frac sold'].mean()
         mad_by_day[i] = robust.mad(dslice['Frac sold'].values)
         i += 1
     # Finalize columns
-    collapsed['Frac sold'] = med_by_day
+    collapsed['Frac sold'] = mean_by_day
     collapsed['Uncertainty'] = mad_by_day # median absolute deviation estimating the stdev
     #print(collapsed)
     # New error estimation    
     if new_err:
         err = np.zeros((len(fixed_curves),len(max_index)))
+        err_low = np.zeros((len(fixed_curves),len(max_index))) # Holds errors where the prediction was too low
+        err_high = np.zeros((len(fixed_curves),len(max_index))) # Holds errors where the prediction was too high
         for i in range(len(fixed_curves)):
             for j in np.arange(1,len(max_index)):
-                err[i,j-1] = abs((project_sales(data, collapsed, (fixed_curves[i])['Total tickets'].values[-j], (fixed_curves[i])['Days before'].values[-j], verbose=False)[0] - (fixed_curves[i])['Total tickets']).values[-1])/(fixed_curves[i])['Total tickets'].values[-1]
-        
-        err_80 = np.percentile(err, 80, axis=0)
-        collapsed['New error'] = np.flip(err_80,axis=0)
+                #err = (project_sales(data, collapsed, (fixed_curves[i])['Total tickets'].values[-j], (fixed_curves[i])['Days efore'].values[-j], verbose=False)[0] - (fixed_curves[i])['Total tickets']).values[-1]/(fixed_curves[i])['Total tickets'].values[-1]
+                err = (_do_fit(collapsed, (fixed_curves[i]).iloc[:-j], project=True) - (fixed_curves[i])['Total tickets']).values[-1]/(fixed_curves[i])['Total tickets'].values[-1]
+                
+                if err >=0:
+                    err_high[i,j-1] = err
+                    err_low[i,j-1] = np.nan
+                else:
+                    err_low[i,j-1] = abs(err)
+                    err_high[i,j-1] = np.nan
+
+        high_80 = np.nanpercentile(err_high, 80, axis = 0)
+        low_80 = np.nanpercentile(err_low, 80, axis=0)
+        #err_80 = np.percentile(err, 80, axis=0)
+        #collapsed['New error'] = np.flip(err_80,axis=0)
+        collapsed['Error high'] = np.flip(high_80,axis=0)
+        collapsed['Error low'] = np.flip(low_80,axis=0)
     collapsed = collapsed.drop(['Tickets', 'Total tickets'], axis=1)
     return(collapsed)
 
@@ -882,11 +900,11 @@ def project_sales_with_fit(data, model, name, date,
     # If day != 1000, the projection will be based only on days up to that day (used when making the projection graph).
     
     if isinstance(model, str):
-        model = data.tt.get_model(model, new_err=True)
+        model = data.tt.get_model(model)#data.tt._preset_models(model, new_err=True)
     else: 
         pass # Hopefully we have been passed a model DataFrame
     
-    sales_path = data.tt.get_sales_curve(name, date, end_on_event=True)
+    sales_path = data.tt.get_sales_curve(name, date, end_on_event=True, pad=True)
     if day != 1000:
         day = min(day, -1*day) # Index with negative numbers
         sales_path = sales_path[sales_path['Days before'] <= day]
@@ -905,7 +923,8 @@ def project_sales_with_fit(data, model, name, date,
     combo = pd.concat([df1, df2], axis=1).reset_index().dropna()
     
     # Log weights to add weight to recent observations
-    weights = np.logspace(0,-2,len(combo))
+    weights = np.logspace(0,-5,len(combo))
+
     if len(combo) == 0:
         if verbose:
             print('project_sales_with_fit: error: not enough data!')
@@ -916,8 +935,8 @@ def project_sales_with_fit(data, model, name, date,
         fit = curve_fit(_f, combo['Frac expected'].values, combo['Total tickets'].values, sigma=weights, absolute_sigma=True)
     
         proj = fit[0]*model['Frac sold'].iloc[-1]
-        low = proj - proj*combo['New error'].iloc[-1]
-        high = proj + proj*combo['New error'].iloc[-1]
+        low = proj - proj*combo['Error low'].iloc[-1]
+        high = proj + proj*combo['Error high'].iloc[-1]
     
     if (max_tickets > 0):
         if proj > max_tickets:
@@ -927,8 +946,80 @@ def project_sales_with_fit(data, model, name, date,
     
     if low < (sales_path.iloc[-1])['Total tickets']:
         low = (sales_path.iloc[-1])['Total tickets']
+    if low > proj:
+        low = proj
     
     return((np.round(np.squeeze(proj),0), np.round(np.squeeze(low),0), np.round(np.squeeze(high),0)))
+    
+def get_model(data, name):
+
+    # Helper function that returns a model from the known global models.
+    
+    load_models(data)
+    
+    try:
+        return(globals()['_model_'+name])
+    except:
+        print('get_model: error: model "'+name+'" does not exist')
+        return(pd.DataFrame())
+    
+def load_models(data, *args, reload=False):
+
+    # This function loads one or more models.
+    # If no arguments are passed, all models are loaded.
+    # Pass a list of models to load only those.
+    # NOTE: if a model exists in memory, it will not be reloaded unless reload=True
+
+    global _model_standard
+    global _model_family
+    global _model_adult
+    global _model_lecture
+
+    if len(args) == 1: # We passed a list to load
+        if isinstance(args[0], list):
+            models_to_load = args[0]
+        else: # Assume we were passed a string
+            models_to_load = [args[0]]
+    else: # Load them all
+        models_to_load = ['standard', 'family', 'adult', 'lecture']
+    
+    for model in models_to_load:
+        if reload:
+            load = True
+        else:
+            load = False
+        try: # Check if the model already exists in memory
+            eval('_model_'+model)
+        except NameError:
+            load = True
+        if load:
+            temp_model = _preset_models(data, model, new_err=True)
+            globals()['_model_'+model] = temp_model
+    
+def _do_fit(model, sales_path, project=False, *kwargs):
+
+    # This internal function fits the model to the data.
+    # If project=False, returns the scalar s, where data = s*model
+    # If project=True, returns a simple projection, s*model[day=0]
+    
+    df1 = sales_path.copy()
+    df2 = model.copy()
+    df1 = df1.set_index('Days before')
+    df2 = df2.set_index('Days before')
+    df2['Frac expected'] = df2['Frac sold']
+    df2 = df2.drop(['Frac sold', 'Uncertainty', 'Total tickets'], axis=1)
+    
+    combo = pd.concat([df1, df2], axis=1).reset_index().dropna()
+    
+    if 'weights' not in kwargs:
+        weights = np.logspace(0,-4,len(combo))   
+    
+    fit = curve_fit(_f, combo['Frac expected'].values, combo['Total tickets'].values, sigma=weights, absolute_sigma=True)  
+    
+    if not project:
+        return(fit)
+    else:
+        return((fit[0]*model['Frac sold'].iloc[-1])[0])
     
 def _f(model, scalar):
     
@@ -945,7 +1036,7 @@ def project_sales(data, model, input1, input2, max_tickets=0, verbose=True, new_
     
     # Create the model, if it's not passed directly in
     if isinstance(model, str): # We were passed a string shorthand
-        model = get_model(data, model, new_err=new_err)
+        model = _preset_models(data, model, new_err=new_err)
     elif isinstance(model, list): # We were passed a list of peformances
         model = create_presale_model(data, model, new_err=new_err)
     else: # We were hopefully passed a DataFrame containing the model directly!
@@ -953,7 +1044,7 @@ def project_sales(data, model, input1, input2, max_tickets=0, verbose=True, new_
     
     # If we want new_err, make sure our model has new_err in it:
     if new_err:
-        if not 'New error' in model:
+        if not 'Error high' in model:
             print('Error: model must be computed with new_err=True')
             return((0,0,0))
     if isinstance(input1, str):
@@ -990,7 +1081,7 @@ def project_sales(data, model, input1, input2, max_tickets=0, verbose=True, new_
         proj = round(sold/day['Frac sold'].values[0]) # The best-guess value
         
         if new_err:
-            high = round(proj + proj*day['New error'].values[0])
+            high = round(proj + proj*day['Error high'].values[0])
         else:
             high = round(sold/(day['Frac sold'].values[0] - day['Uncertainty'].values[0]))      
         if (high < 0) and (max_tickets == 0): 
@@ -999,7 +1090,7 @@ def project_sales(data, model, input1, input2, max_tickets=0, verbose=True, new_
             high = max_tickets
         
         if new_err:
-            low = round(proj - proj*day['New error'].values[0])
+            low = round(proj - proj*day['Error low'].values[0])
         else:
             low = round(sold/(day['Frac sold'].values[0] + day['Uncertainty'].values[0]))
         if not np.isfinite(low):
@@ -1035,7 +1126,7 @@ def project_sales_path(data, model, input1, input2,
         return()
     
     if fit:
-        sales_curve = get_sales_curve(data, input1, input2)
+        sales_curve = get_sales_curve(data, input1, input2, pad=True)
         days_out = (sales_curve.iloc[-1])['Days before']
         proj, low, high = project_sales_with_fit(data, model, input1, input2, max_tickets=0)
     else:
@@ -1053,7 +1144,7 @@ def project_sales_path(data, model, input1, input2,
         day_index = np.where(model['Days before'].values == days_out)[0]
         return(model['Days before'].values[day_index[0]:], path.values[day_index[0]:])
 
-def get_model(data, name, list=False, new_err=False):
+def _preset_models(data, name, list=False, new_err=False):
 
     # Function to return a pre-defined sales model by name. Setting
     # list=True returns the list of performances included in the 
@@ -1062,6 +1153,7 @@ def get_model(data, name, list=False, new_err=False):
     models = {'standard': [('Science on Tap', '2018-04-13'),
                            ('Science on Tap', '2018-07-20'),
                            ('Science on Tap', '2018-10-12'),
+                           ('Science on Tap', '2019-03-30'),
                            ('Give Back Game Night', '2018-08-18'),
                            ('Reel Adventures', '2018-05-12'),
                            ('Reel Adventures', '2018-05-18'),
@@ -1078,7 +1170,13 @@ def get_model(data, name, list=False, new_err=False):
               'adult':    [('Science on Tap', '2018-04-13'),
                            ('Science on Tap', '2018-07-20'),
                            ('Science on Tap', '2018-10-12'),
-                           ('Give Back Game Night', '2018-08-18')]}
+                           ('Science on Tap', '2019-03-30'),
+                           ('Give Back Game Night', '2018-08-18')],
+                           
+              'lecture':  [('Lecture Series', '2019-04-15'),
+                           ('Lecture Series', '2018-05-10'),
+                           ('Lecture Series', '2018-03-22'),
+                           ('Lecture Series', '2018-02-08 19:00:00')]}
         
     if name.lower() in models:
         if list:
@@ -1093,7 +1191,7 @@ def get_model(data, name, list=False, new_err=False):
             return(pd.DataFrame())
                  
         
-def create_model_chart(data, curve_list, filename='', active=[], simple=False, title=''):
+def create_model_chart(data, model_name, filename='', active=[], simple=False, title=''):
     
     # Function to plot the model for a given curve list and
     # all of the data that went into it. Curves passed to
@@ -1103,7 +1201,8 @@ def create_model_chart(data, curve_list, filename='', active=[], simple=False, t
     # Clear the current figure
     plt.clf()
     
-    model = create_presale_model(data, curve_list)
+    model = get_model(data, model_name)
+    curve_list = _preset_models(data, model_name, list=True)
     
     sb.set_context('poster')
     sb.set_palette('colorblind')
@@ -1116,10 +1215,10 @@ def create_model_chart(data, curve_list, filename='', active=[], simple=False, t
         
     # Overplot the model
     plt.plot(model['Days before'], 100*model['Frac sold'], linewidth=7, label='Model')
-    
+
     # Recursively plot the curves from active
     for curve in active:
-        temp = get_sales_curve(data, curve[0], curve[1], max_tickets=int(curve[2]))
+        temp = get_sales_curve(data, curve[0], curve[1], max_tickets=int(curve[2]), pad=True)
         plt.plot(temp['Days before'], 100*temp['Frac sold'], label=curve[0] + ' ' + curve[1])
 
     if len(active) > 0:
@@ -1187,6 +1286,7 @@ def create_tickets_chart(df, *args,
         return(fig)
 
 def create_sales_chart(*args,
+                       annotate=False,
                        title='',
                        frac=False,
                        end_on_event=True,
@@ -1196,7 +1296,9 @@ def create_sales_chart(*args,
     # Function to plot the sales curves for given events/
     # curve list should be a list of tuples in the format
     # (perf_name, perf_date, max_tickets) with max_tickets
-    # being an optional parameter
+    # being an optional parameter. Set annotate=True to 
+    # label each curve with the current number of sales 
+    # (only if frac=False).
     
     # Clear the figure
     plt.clf()
@@ -1240,8 +1342,12 @@ def create_sales_chart(*args,
     if not frac: # We're plotting the total number of tickets
         for curve in curve_list:
             temp = get_sales_curve(data, curve[0], curve[1], pad=True)
+
             plt.plot(temp['Days before'], temp['Total tickets'], label=curve[0] + ' ' + str(curve[1]))
-            plt.ylabel('Tickets sold')
+            num = temp['Total tickets'].iloc[-1]
+            if annotate:
+                plt.annotate(str(int(num)),xy=(temp['Days before'].iloc[-1], num), xytext=(4,-8), textcoords='offset points')
+        plt.ylabel('Tickets sold')
         
     else:
         for curve in curve_list:
@@ -1250,7 +1356,7 @@ def create_sales_chart(*args,
             else: # No max tickets supplied
                 temp = get_sales_curve(data, curve[0], curve[1])            
             plt.plot(temp['Days before'], 100*temp['Frac sold'], label=curve[0] + ' ' + str(curve[1]))
-            plt.ylabel('Percent of tickets sold')
+        plt.ylabel('Percent of tickets sold')
     
     plt.xlabel('Days until event')
     plt.title(title)
@@ -1283,13 +1389,17 @@ def create_projection_chart(data, model, name, perf_date,
                             fit=True,
                             max_tickets=0, 
                             pad=True,
+                            #tight=False,
                             simple=False,
                             title=''):
     
     # Function to create a chart that plots the past and predicted sales
     # for a given event. Set simple=True to supress the display of daily
     # projections. Set pad=True to extend projected data through yesterday
-    # (useful if there haven't been any ticket sales in several days)
+    # (useful if there haven't been any ticket sales in several days). Set
+    # tight=True to trim the x-axis to only those days where the model is 
+    # non-zero (useful when tickets are being sold far before the model is 
+    # valid).
     # If fit=True, the "smart" approach using fitting to determine sales
     # projections is used. This is much slower, but should be more stable.
     
@@ -1298,11 +1408,13 @@ def create_projection_chart(data, model, name, perf_date,
     
     # Create the model, if it's not passed directly in
     if isinstance(model, str): # We were passed a string shorthand
-        model = get_model(data, model, new_err=fit)
+        model = _preset_models(data, model, new_err=fit)
+        if not 'Days before' in model: # Bad model 
+            return
     elif isinstance(model, list): # We were passed a list of peformances
         model = create_presale_model(data, model, new_err=fit)
     else: # We were hopefully passed a DataFrame containing the model directly!
-        if fit and ('New error' not in model):
+        if fit and ('Error high' not in model):
             print('create_projection_chart: error: if fit=True (default), model must be generated with new_err=True')
 
     # Set basic plot parameters
@@ -1343,8 +1455,7 @@ def create_projection_chart(data, model, name, perf_date,
                                                     perf_curve['Days before'].iloc[i], 
                                                     max_tickets=max_tickets, 
                                                     verbose=False)
-                    
-                                            
+                                                                
             plt.errorbar(perf_curve['Days before'].iloc[i], 
                          proj, yerr=np.array([[proj-low],[high-proj]]), 
                          fmt='o', color=pal[0])            
@@ -1356,11 +1467,24 @@ def create_projection_chart(data, model, name, perf_date,
         full_bool = False
     else:
         full_bool = True
-    path_days, path_proj = project_sales_path(data, model, 
-                                              int(perf_curve['Total tickets'].iloc[-1]), 
-                                              int(perf_curve['Days before'].iloc[-1]), 
-                                              max_tickets=max_tickets, 
-                                             full=full_bool)
+    
+    if fit:
+        path_days, path_proj = project_sales_path(data, model, 
+                                                  name, 
+                                                  perf_date, 
+                                                  max_tickets=max_tickets, 
+                                                  full=full_bool)
+    else:
+        path_days, path_proj = project_sales_path(data, model, 
+                                                  int(perf_curve['Total tickets'].iloc[-1]), 
+                                                  int(perf_curve['Days before'].iloc[-1]), 
+                                                  max_tickets=max_tickets, 
+                                                  full=full_bool)
+    # This forces the sales path to connect with the number of current sales. If fit=False,
+    # this just sets the same value over again.
+    if simple:
+        path_proj[0] = (perf_curve.iloc[-1])['Total tickets']
+    
     plt.plot(path_days, path_proj, 
         color=pal[2], label='Model', linewidth=6)
     plt.errorbar(0, proj, yerr=np.array([[proj-low],[high-proj]]), fmt='o', color=pal[0],
@@ -1378,7 +1502,6 @@ def create_projection_chart(data, model, name, perf_date,
     if np.isfinite(high):
         plt.annotate(str(int(high)),xy=(0, high), xytext=(8,-8), textcoords='offset points')
 
-    plt.xlim((min(perf_curve['Days before'])-2,1))
     plt.ylim((0,1.05*max_tickets))
     plt.xlabel('Days until event')
     plt.ylabel('Projected attendence')
@@ -1391,6 +1514,15 @@ def create_projection_chart(data, model, name, perf_date,
     frame.set_color('white')
     frame.set_facecolor('white')
     frame.set_edgecolor('white')
+    
+    plt.xlim((min(perf_curve['Days before'])-1,1))
+    # if tight: # Overrides xlim from above
+        # # For events with very long sales histories; set plot lims to match model length.
+        # useful = path_days[path_proj > 0]
+        # if len(useful) > 0:
+            # plt.xlim(min(useful)-1, 1)
+        # else:
+            # print('create_projection_chart: warning: cannot create tight plot because model is always zero. This will resolve itself closer to the event.')
     
     if simple:
         # Add an explainer to the bottom of the chart
@@ -1443,10 +1575,7 @@ class ttAccessor(object):
     
     def search(self, **kwargs):
         return(search(self._obj, **kwargs))
-        
-    def get_model(self, *args, **kwargs):
-        return(get_model(self._obj, *args, **kwargs))
-    
+            
     def get_show(self, *args, **kwargs):
         return(get_show(self._obj, *args, **kwargs))
     
@@ -1460,7 +1589,13 @@ class ttAccessor(object):
         return(get_sales_curve(self._obj, *args, **kwargs))
     
     def create_presale_model(self, *args, **kwargs):
-        return(create_presale_model(self._obj, *args, **kwargs))
+        return(create_presale_model(self._obj, *args, **kwargs))    
+    
+    def get_model(self, *args, **kwargs):
+        return(get_model(self._obj, *args, **kwargs))
+    
+    def load_models(self, *args, **kwargs):
+        return(load_models(self._obj, *args, **kwargs))
     
     def project_sales(self, *args, **kwargs):
         return(project_sales(self._obj, *args, **kwargs))
