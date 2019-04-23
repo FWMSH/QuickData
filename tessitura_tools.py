@@ -107,7 +107,7 @@ def add_venue(df):
                  'Jerusalem', 'Dream Big', 'Dolphins', 'Night at the Museum',
                  'Rolling Stones at the Max', 'Journey to the South Paci',
                  'Born to be Wild', 'Dinosaurs Alive', 'D-Day: Normandy 1944',
-                 'Backyard Wilderness', 'National Parks Adventure', 'Frozen',
+                 'Backyard Wilderness', 'National Parks Adventure', 'Frozen', 'The Incredibles',
                  'The Polar Express', 'Omni Admission', 'Moana',
                  'Superpower Dogs', 'Under the Sea', 'Apollo 11',
                  'How To Train Your Dragon', 'The Secret Life of Pets', 'Fantastic Beasts']
@@ -569,9 +569,14 @@ def resolve_string_date(date):
                 year = int(date[4:6])
             dates.append(pd.to_datetime('20'+str(year-1)+'-09-30'))
             dates.append(pd.to_datetime('20'+str(year)+'-10-01'))
+        elif date == 'future':
+            today = datetime.datetime.today().strftime('%Y-%m-%d')
+            dates.append(pd.to_datetime(today))
+            future = (datetime.datetime.today() + pd.Timedelta('365 day')).strftime('%Y-%m-%d')
+            dates.append(pd.to_datetime(future))
         else:
             dates.append(pd.to_datetime(date))
-    
+        
     if len(dates) < 3:
         return(pd.to_datetime(dates))
     else:
