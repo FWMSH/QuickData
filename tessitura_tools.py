@@ -96,7 +96,7 @@ def add_venue(df):
     
     venues = df['Venue'].values
     
-    noble_list = ['Texas Sky Tonight', 'Our Solar System','Planetarium Experience', 'This Is Your Captain Speaking','Fragile Planet', 'Design A Mission', 'One World, One Sky','Take Me To The Stars', 'Noble Admission','Black Holes', 'Stars Of The Pharaohs', 'Sun, Earth, Moon: Beginnings','Sun, Earth, Moon: Explorations','Sun, Earth, Moon: Connections','Sun, Earth, Moon: Advanced']
+    noble_list = ['Texas Sky Tonight', 'Our Solar System','Planetarium Experience', 'This Is Your Captain Speaking','Fragile Planet', 'Design A Mission', 'One World, One Sky','Take Me To The Stars', 'Noble Admission','Black Holes', 'Stars Of The Pharaohs', 'Sun, Earth, Moon: Beginnings','Sun, Earth, Moon: Explorations','Sun, Earth, Moon: Connections','Sun, Earth, Moon: Advanced', 'Imagine the Moon']
     noble = df.loc[df['Description'].isin(noble_list)]
     venues[noble.index] = 'Noble'
     
@@ -1162,12 +1162,18 @@ def _preset_models(data, name, list=False, new_err=False):
                            ('Give Back Game Night', '2018-08-18'),
                            ('Reel Adventures', '2018-05-12'),
                            ('Reel Adventures', '2018-05-18'),
+                           ('Reel Adventures', '2019-04-26'),
+                           ('Reel Adventures', '2019-05-10'),
+                           ('Reel Adventures', '2019-05-17'),
                            ('FAMapalooza', '2018-06-22'),
                            ('FAMapalooza', '2018-07-14'),
                            ('FAMapalooza', '2018-08-11')],
                            
               'family':   [('Reel Adventures', '2018-05-12'),
                            ('Reel Adventures', '2018-05-18'),
+                           ('Reel Adventures', '2019-04-26'),
+                           ('Reel Adventures', '2019-05-10'),
+                           ('Reel Adventures', '2019-05-17'),
                            ('FAMapalooza', '2018-06-22'),
                            ('FAMapalooza', '2018-07-14'),
                            ('FAMapalooza', '2018-08-11')],
@@ -1179,6 +1185,7 @@ def _preset_models(data, name, list=False, new_err=False):
                            ('Give Back Game Night', '2018-08-18')],
                            
               'lecture':  [('Lecture Series', '2019-04-15'),
+                           ('Lecture Series', '2019-05-13'),
                            ('Lecture Series', '2018-05-10'),
                            ('Lecture Series', '2018-03-22'),
                            ('Lecture Series', '2018-02-08 19:00:00')]}
