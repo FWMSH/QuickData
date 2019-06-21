@@ -46,9 +46,6 @@ def load_data(path):
         full_data = full_data.fillna(0)
         full_data['Tickets'] = full_data['Email#'] + full_data['Person#'] + full_data['Mail#'] + full_data['Phone#'] + full_data['Web#']
         full_data['Revenue'] = full_data['Email$'] + full_data['Person$'] + full_data['Mail$'] + full_data['Phone$'] + full_data['Web$']
-        #full_data['Day of week'] = full_data['Perf date'].dt.weekday
-        #full_data['Day name'] = full_data['Perf date'].dt.strftime('%A')
-        #full_data['Shows'] = 1
 
         # Drop rows with no useful data before we do expensive operations
         full_data = full_data[full_data['Tickets'] != 0]
@@ -109,7 +106,8 @@ def add_venue(df):
                  'Born to be Wild', 'Dinosaurs Alive', 'D-Day: Normandy 1944',
                  'Backyard Wilderness', 'National Parks Adventure', 'Frozen', 'The Incredibles',
                  'The Polar Express', 'Omni Admission', 'Moana',
-                 'Superpower Dogs', 'Under the Sea', 'Apollo 11',
+                 'Superpower Dogs', 'Under the Sea', 'Apollo 11', 'Hidden Figures',
+                 'Independence Day', 'Serenity','Fifth Element',
                  'How To Train Your Dragon', 'The Secret Life of Pets', 'Fantastic Beasts']
     omni = df.loc[df['Description'].isin(omni_list)]
     venues[omni.index] = 'Omni'
@@ -122,36 +120,65 @@ def add_venue(df):
     
     return(df)
 
-def add_audience(df):
+def _compute_audience(ser, all_price):
+    
+    # Helper function called by add_audience() to apply a School/Public label to a dataframe.
+    # Assumes ttCode has already been added to ser
+    # all_price is a pricetyple DataFrame covering ser and any other rows being computed.
+
+    df = pd.DataFrame(ser).transpose()
+    
+    desc = df['Description'].values[0]
+    code = df['ttCode'].values
+    extracted = _slice_pricing_data(all_price, code)
+    if  (desc == 'General Admission') or (desc == 'Parking'):
+        return(['Public'])
+    frac = get_school_data(extracted, silent=True)['School fraction']
+    if np.isfinite(frac): # Matching pricetype data found
+        if (frac > 0.1):
+            return(['School'])
+        else:
+            return(['Public'])
+    else: # No pricetype data match found.
+        return(['Unknown'])
+        
+def add_audience(data):
     
     # Function to differentiate between a school and public
-    # audience based on the day of the week and the time of day
+    # audience based on the pricetype data available.
+    
+    df = data.copy()
     
     df = df.reset_index(drop=True)
     
     if len(df) == 0:
         return(df)
+            
+    df = add_unique_code(df)
+    pricing_data = get_pricing_data(df, silent=True, return_ttCode=True)
+    df['Audience'] = df.apply(_compute_audience,axis=1, result_type='expand', args=[pricing_data])
+    df = df.drop('ttCode', axis=1)
     
-    # Add Audience column
-    df['Audience'] = 'Public'
-    values = df['Audience'].values
-    # no_school days are weekdays when we're on a public schedule
-    no_school = pd.to_datetime(['2018-03-12', '2018-03-13', '2018-03-14', '2018-03-15', '2018-03-16',
-                 '2018-01-02', '2018-01-03', '2018-01-04', '2018-01-05', '2018-01-15',
-                 '2018-05-28', '2018-09-03', '2018-09-10', '2018-01-01', '2018-10-08', '2018-11-23', '2018-11-19', '2018-11-20', '2018-11-21', '2018-11-23', '2019-03-11', '2019-03-12', '2019-03-13', '2019-03-14', '2019-03-15'])
+    # # Add Audience column
+    # df['Audience'] = 'Public'
+    # values = df['Audience'].values
+    # # no_school days are weekdays when we're on a public schedule
+    # no_school = pd.to_datetime(['2018-03-12', '2018-03-13', '2018-03-14', '2018-03-15', '2018-03-16',
+                 # '2018-01-02', '2018-01-03', '2018-01-04', '2018-01-05', '2018-01-15',
+                 # '2018-05-28', '2018-09-03', '2018-09-10', '2018-01-01', '2018-10-08', '2018-11-23', '2018-11-19', '2018-11-20', '2018-11-21', '2018-11-23', '2019-03-11', '2019-03-12', '2019-03-13', '2019-03-14', '2019-03-15'])
 
-    # This is all the weekdays within the general range of the school year
-    school_dates = pd.bdate_range('2018-01-02', '2018-05-31').union(pd.bdate_range('2018-09-04', '2018-12-21')).union(pd.bdate_range('2019-02-12', '2019-05-31'))
+    # # This is all the weekdays within the general range of the school year
+    # school_dates = pd.bdate_range('2018-01-02', '2018-05-31').union(pd.bdate_range('2018-09-04', '2018-12-21')).union(pd.bdate_range('2019-02-12', '2019-05-31'))
     
-    # This is all those weekdays which also have shows before 1:30 PM
-    match = df['Perf date'].dt.date.isin(pd.Series(school_dates).dt.date) & (df['Perf date'].dt.time < pd.to_datetime('13:30:00').time())
-    values[match] = 'School'
+    # # This is all those weekdays which also have shows before 1:30 PM
+    # match = df['Perf date'].dt.date.isin(pd.Series(school_dates).dt.date) & (df['Perf date'].dt.time < pd.to_datetime('13:30:00').time())
+    # values[match] = 'School'
     
-    # Now set the days in no_school back to Public
-    match2 = df['Perf date'].dt.date.isin(pd.Series(no_school).dt.date)
-    values[match2] = 'Public'
+    # # Now set the days in no_school back to Public
+    # match2 = df['Perf date'].dt.date.isin(pd.Series(no_school).dt.date)
+    # values[match2] = 'Public'
                  
-    df['Audience'] = values
+    # df['Audience'] = values
     
     return(df)
     
@@ -172,18 +199,25 @@ def fix_names(df):
                 'LaN: Our Solar System', 'LaN: Solar System', 'LaN Solar System',
                 'Live at the Noble Solar System', 'LaN: Our Solar System Grp',
                 'LaN: Our Amazing Solar System', 'LAN: Our Solar System',
-                'LATN: Our Solar System')
+                'LATN: Our Solar System', 'Live at the Noble:Solar System')
     df = df.replace(to_replace=latn_oss, value="Our Solar System")
         
     latn_tst = ('LaN: Texas Sky Tonight', 'Texas Sky Tonight', 'LaN: Texas Sky',
                 'TX Sky Tonight', 'LaN: Texas Sky Tonig', 'FY18 LaN: Texas Sky',
                 'FY18 Texas Sky Tonig', 'LaN Texas Sky Tonight',
+                'LaN Texas sky Tonight', 'Live at the Noble: Texas Sky',
                 'LaN: Texas Sky Tonight Grp', 'LaN: Texas sky Tonight',
                 'LAN: Texas Sky Tonight', 'LATN: Texas Sky Tonight')
     df = df.replace(to_replace=latn_tst, value="Texas Sky Tonight")
         
     omni_amj = ("America's Musical J", "America's Musical Jo", )
     df = df.replace(to_replace=omni_amj, value="America's Musical Journey")
+        
+    omni_superpower = ("Superpower Dogs Grp")
+    df = df.replace(to_replace=omni_superpower, value="Superpower Dogs")
+        
+    omni_tornado = ("Tornado Alley Grp")
+    df = df.replace(to_replace=omni_tornado, value="Tornado Alley")
         
     omni_cor = ('Coral Reef Adventure', 'Coral Reef', 'Coral Reef Adv', 'Coral Reef Adve', 'FY18 Coral Reef Adve')
     df = df.replace(to_replace=omni_cor, value="Coral Reef Adventure")
@@ -193,10 +227,11 @@ def fix_names(df):
         
     nob_owos = ('Big Bird', 'One World, One Sky', 'One World, One Sky: Big B',
                 'One World, One Sky: Big Birds', 'One World One Sky',
+                'One World, One Sky Grp', 'One World, One Sky: Big Bird',
                 "One World, One Sky: Big Bird's", "One World One Sky: Big Bird's")
     df = df.replace(to_replace=nob_owos, value="One World, One Sky")
         
-    nob_SEM_adv = ('Sun, Earth, Moon: Advance', 'Sun, Earth, Moon: Adv', 'Sun, Earth, and Moon: Ad')
+    nob_SEM_adv = ('Sun, Earth, Moon: Advance', 'Sun, Earth, Moon: Adv', 'Sun, Earth, and Moon: Ad', 'Sun, Earth, Moon: Ad Grp')
     df = df.replace(to_replace=nob_SEM_adv, value="Sun, Earth, Moon: Advanced")
     
     nob_SEM_con = ('Earth, Sun, Moon: C', 'Earth, Sun, Moon: Connect')
@@ -205,7 +240,7 @@ def fix_names(df):
     nob_SEM_exp = ('Earth, Sun, Moon: E', 'Earth, Sun, Moon: Explora')
     df = df.replace(to_replace=nob_SEM_exp, value="Sun, Earth, Moon: Explorations")
     
-    nob_SEM_beg = ('Earth, Sun, Moon: B', 'Sun, Earth, and Moon: Basic', 'Sun, Earth, and Moon: Bas', 'Earth, Sun, Moon: Beginni')
+    nob_SEM_beg = ('Earth, Sun, Moon: B', 'Sun, Earth, and Moon: Basic', 'Sun, Earth, and Moon: Bas', 'Earth, Sun, Moon: Beginni', 'Sun, Earth, Moon:B Grp')
     df = df.replace(to_replace=nob_SEM_beg, value="Sun, Earth, Moon: Beginnings")
         
     nob_TIYCS = ('This Is Your Captain')
@@ -217,10 +252,10 @@ def fix_names(df):
     nob_black_holes = ('FY18 Black Holes')
     df = df.replace(to_replace=nob_black_holes, value="Black Holes")
         
-    bday_extra = ('Birthday Party Extra', 'Birthday Party Ex')
+    bday_extra = ('Birthday Party Extra', 'Birthday Party Ex', 'Birthday Party Extras')
     df = df.replace(to_replace=bday_extra, value="Birthday Party Extra")
         
-    bday = ('FY18 Birthday Partie', 'Birthday Party')
+    bday = ('FY18 Birthday Partie', 'Birthday Party','Birthday Parties')
     df = df.replace(to_replace=bday, value="Birthday Party")
         
     mus_park = ('Parking', 'Museum Parking')
@@ -261,12 +296,17 @@ def fix_names(df):
     df = df.replace(to_replace=omni_dream, value="Dream Big")
         
     reel_adv = ('RA Harry Potter 4', 'Reel Adventures', 'RA Night at the Museum',
+                "Reel Adventures: Harry Potter",
                 'RA: Night at the Museum', 'Reel Adventures Harry Potter 4', 'RA Harry Potter 1')
     df = df.replace(to_replace=reel_adv, value="Reel Adventures")
     
-    celeb_lecture = ('H. P. Newquist Lecture', 'David Zinn Celebrity Lecture',
-                     'Brantley Hargrove Lecture')
+    celeb_lecture = ('H. P. Newquist Lecture', 'David Zinn Celebrity Lecture', 'Adrian Garza',
+                     'Matt Tedder',
+                     'Brantley Hargrove Lecture', 'Paul Sutter Lecture', 'Michael Webber Lecture')
     df = df.replace(to_replace=celeb_lecture, value="Lecture Series")
+    
+    live_at_the_museum = ('The Vince Lujan Project','Buffalo Ruckus','Danni and Kris', 'Center 313','Light Crust Doughboys')
+    df = df.replace(to_replace=live_at_the_museum, value="Live at the Museum")
     
     famipalooza = ('FAMapalooza: Bubble Festival', 'FAMapalooza: Beat the Heat',
                    'FAMapalooza: Pawesome Animals')
@@ -274,6 +314,9 @@ def fix_names(df):
     
     polar_pj = ('Polar Express Pajama Party')
     df = df.replace(to_replace=polar_pj, value="Polar Express PJ Party")
+    
+    science_on_tap = ('Science on Tap: Sweet & Savory')
+    df = df.replace(to_replace=science_on_tap, value="Science on Tap")
     
     return(df)
     
@@ -366,12 +409,16 @@ def get_yoy(data, **kwargs):
     return(result)
     
 
-def get_age_data(data):
+def get_age_data(data, get='', debug=False):
     
     # Function to return the number of tickets sold to adults and kids.
     # NOTE: some price types (e.g., comp)cannot be matched with adults
-    # or children and are omitted. 'Adult fraction' is the fraction of
-    # *tickets* sold to adults
+    # or children and are omitted. 
+    # set get='' to get a summary DataFrame
+    # set get='adult' to get a DataFrame with only adult tickets
+    # set get='child' to get a DataFrame with only child tickets
+    #'Adult fraction' is the fraction of *tickets* sold to adults
+ 
            
     df = data.copy()
            
@@ -397,22 +444,30 @@ def get_age_data(data):
         adult_data = known_data[known_data['Price type'].isin(adult_types)]
         child_data = known_data[known_data['Price type'].isin(child_types)]
         
-        results = {}
-        results['Adult tickets'] = adult_data.sum()['Tickets']
-        results['Adult revenue'] = adult_data.sum()['Revenue']
-        results['Child tickets'] = child_data.sum()['Tickets']
-        results['Child revenue'] = child_data.sum()['Revenue']
-        results['Adult fraction'] = np.round(results['Adult tickets']/(results['Adult tickets']+results['Child tickets']),3)
-        return(results)
+        if get == 'adult':
+            return(adult_data)
+        elif get == 'child':
+            return(child_data)
+        else:    
+            results = {}
+            results['Adult tickets'] = adult_data.sum()['Tickets']
+            results['Adult revenue'] = adult_data.sum()['Revenue']
+            results['Child tickets'] = child_data.sum()['Tickets']
+            results['Child revenue'] = child_data.sum()['Revenue']
+            results['Adult fraction'] = np.round(results['Adult tickets']/(results['Adult tickets']+results['Child tickets']),3)
+            return(results)
         
     else: # We need to match (description, perf date) tuples to the price type data
-        df = get_pricing_data(df)
-        return(get_age_data(df))
+        df = get_pricing_data(df, debug=debug)
+        return(get_age_data(df, get=get))
         
-def get_group_data(data):
-    
-    # Function to return the number of tickets sold to groups.
-    # 'Group fraction' is the fraction of *tickets* sold to  groups
+def get_group_data(data, get='', debug=False):
+
+    # Function to return data related to groups.
+    # Set get='group' to return a DataFrame containing all the data for groups
+    # Set get='regular' to return a DataFrame containing all the non-group data
+    # set get='' to return a summary DataFrame
+    # 'Group fraction' is the fraction of *tickets* sold to  groups.
            
     df = data.copy()
            
@@ -437,21 +492,78 @@ def get_group_data(data):
         group_data = known_data[known_data['Price type'].isin(group_types)]
         regular_data = known_data[known_data['Price type'].isin(regular_types)]
         
-        results = {}
-        results['Group tickets'] = group_data.sum()['Tickets']
-        results['Group revenue'] = group_data.sum()['Revenue']
-        results['Regular tickets'] = regular_data.sum()['Tickets']
-        results['Regular revenue'] = regular_data.sum()['Revenue']
-        results['Group fraction'] = np.round(results['Group tickets']/(results['Group tickets']+results['Regular tickets']),3)
-        return(results)
+        if get.lower() == 'group':
+            return(group_data)
+        elif get.lower() == 'regular':
+            return(regular_data)
+        else:       
+            results = {}
+            results['Group tickets'] = group_data.sum()['Tickets']
+            results['Group revenue'] = group_data.sum()['Revenue']
+            results['Regular tickets'] = regular_data.sum()['Tickets']
+            results['Regular revenue'] = regular_data.sum()['Revenue']
+            results['Group fraction'] = np.round(results['Group tickets']/(results['Group tickets']+results['Regular tickets']),3)
+            return(results)
         
     else: # We need to match (description, perf date) tuples to the price type data
-        df = get_pricing_data(df)
-        return(get_group_data(df))
+        df = get_pricing_data(df, debug=debug)
+        return(get_group_data(df, get=get))
         
-def get_member_data(data):
+def get_school_data(data, get='', debug=False, silent=False):
+
+    # Function to return data related to school groups.
+    # Set get='school' to return a DataFrame containing all the data for school groups
+    # Set get='regular' to return a DataFrame containing all the data that isn't schools
+    # set get='' to return a summary DataFrame
+    # 'School fraction' is the fraction of *tickets* sold to schools.
+           
+    df = data.copy()
+           
+    # Check if our dataframe includes price types
+    if 'Price type' in df:
+        
+        school_types = ['School Combo Adult','School Combo Free Adult','School Free Adult','FWISD Free Adult','FWISD Adult','FMN Adults','FMN Chaperones','School Adult','School Combo Student',  'School Student','FWISD Student','FMN Students','School Free Student']
+        
+        regular_types = ['Group Junior','Group C2 Junior','Group C3 Junior','Birthday Guest', 'Birthday Paid Guest','Group C2 Adult','Group C3 Adult','Group Free Adult','Group C2 Free Adult','Group C3 Free Adult','Group Adult','Combo 2 Junior', 'Junior','Member Junior', 'Wonder Free Junior',  'Combo 3 Junior','ASTC Junior',  'Perot Junior','Special Event Member Junior','Wonder Discount Junior','Stock Show Junior','Stock Show Member Junior', 'Stock Show Member Under 6','Stock Show Under 6','Add-on Planetarium Jr', 'Junior Upcharge','Staff Junior','Adult', 'Combo 2 Adult', 'Member Adult','Wonder Free Adult','Combo 3 Adult','Service','ASTC Adult','Perot Adult','Staff Adult','Special Event Member Adult','Adult Upcharge','Wonder Discount Adult','Stock Show Adult', 'Stock Show Member Adult', 'Add-on Planetarium Adult','$5 Add-on',  'Comp', 'Omni Staff Guest', 'Member Parking', 'Parking', 'Museum Parking Comp', 'Planetarium Member','DMR Discover Member', 'DMR Wonder Member', 'Museum Parking - CR/NCM','Special Event','2 Day Pass', '3 Day Pass']
+        
+        unknown_types = ['Kitchen Chemistry','Scribblebots','Party Animals','Dino Discovery']
+        
+        # Make sure the categories above contain all the
+        # price types. Over time, as new ones are added, the lists will need to be
+        # updated.
+        check_data = df[~df['Price type'].isin(school_types+regular_types+unknown_types)]
+        if len(check_data) > 0:
+            if not silent:
+                print('get_school_data: Warning: New price types detected. New types:' + str(check_data['Price type'].unique()))
+            
+        # Reduce to the data that we know as a type
+        known_data = df[~df['Price type'].isin(unknown_types)]
+        school_data = known_data[known_data['Price type'].isin(school_types)]
+        regular_data = known_data[known_data['Price type'].isin(regular_types)]
+        
+        if get.lower() == 'school':
+            return(school_data)
+        elif get.lower() == 'regular':
+            return(regular_data)
+        else:       
+            results = {}
+            results['School tickets'] = school_data.sum()['Tickets']
+            results['School revenue'] = school_data.sum()['Revenue']
+            results['Regular tickets'] = regular_data.sum()['Tickets']
+            results['Regular revenue'] = regular_data.sum()['Revenue']
+            results['School fraction'] = np.round(results['School tickets']/(results['School tickets']+results['Regular tickets']),3)
+            return(results)
+        
+    else: # We need to match (description, perf date) tuples to the price type data
+        df = get_pricing_data(df, debug=debug, silent=silent)
+        return(get_school_data(df, get=get))
+        
+def get_member_data(data, get='', debug=False):
     
     # Function to return the number and fraction of tickets sold to members.
+    # Set get='' to get a summary DataFrame
+    # Set get='member' to get only tickets sold to members
+    # Set get='guest' to get only tickets sold to members
     
     df = data.copy()
     if 'Price type' in data: # Need the DataFrame to include princing info
@@ -469,18 +581,23 @@ def get_member_data(data):
         
         member_data = df[df['Price type'].isin(member_types)]
         guest_data = df[df['Price type'].isin(guest_types)]
-
-        result = {}
-        result['Member tickets'] = member_data.sum()['Tickets']
-        result['Member revenue'] = member_data.sum()['Revenue']
-        result['Guest tickets'] = guest_data.sum()['Tickets']
-        result['Guest revenue'] = guest_data.sum()['Revenue']
-        result['Member fraction'] = np.round(result['Member tickets']/(result['Member tickets'] + result['Guest tickets']),3)
-        return(result)      
+        
+        if get == 'member':
+            return(member_data)
+        elif get == 'guest':
+            return(guest_data)
+        else:
+            result = {}
+            result['Member tickets'] = member_data.sum()['Tickets']
+            result['Member revenue'] = member_data.sum()['Revenue']
+            result['Guest tickets'] = guest_data.sum()['Tickets']
+            result['Guest revenue'] = guest_data.sum()['Revenue']
+            result['Member fraction'] = np.round(result['Member tickets']/(result['Member tickets'] + result['Guest tickets']),3)
+            return(result)      
     
     else: # Retreive the proper DataFrame and call this function recursively
-        df = get_pricing_data(df)
-        return(get_member_data(df))
+        df = get_pricing_data(df, debug=debug)
+        return(get_member_data(df, get=get))
     
 def load_pricing_data():
 
@@ -493,29 +610,45 @@ def load_pricing_data():
         if not 'ttCode' in tt_pricetype:
             tt_pricetype = add_unique_code(tt_pricetype)
     
-def get_pricing_data(data, debug=False):
+def _slice_pricing_data(data, to_extract):
+
+    # Function that takes a DataFrame of pricing data and returns values matching the ttCodes given by to_extract. to_extract must be a list of ttCodes.
+    
+    return(data[data['ttCode'].isin(to_extract)])
+    
+def get_pricing_data(data, debug=False, retain_zero=False, return_ttCode=True, silent=False):
 
     # Function to take a DataFrame without a Price type column and look
     # up the pricing data for it.
+    # Set retain_zero = True to not drop shows with no ticket sales. These
+    # shows basically always return no pricing data.
     
     global tt_pricetype
     load_pricing_data()
-    
     df = data.copy()
-    df = fix_names(df)
+    #df = fix_names(df)
     df = add_unique_code(df)
     
+    if not retain_zero:
+        df = df[df['Tickets'] > 0]
+    
     to_match = df['ttCode'].unique()
-    # Check whether all the data to match can be found in tt_pricetype   
-    overlap_check = pd.Series(to_match).isin(tt_pricetype['ttCode'])
-    if min(overlap_check) is False:
-        problem = (df[df['ttCode'].isin(to_match[~overlap_check])])[['Description','Perf date']]
-        print('Warning: Price type data does not cover every row. Data can be unreliable for special events and is only updated monthly. Rows missing: ' + str(len(problem)))
-        if debug:
-            print(problem)
+    
+    # Check whether all the data to match can be found in tt_pricetype
+    if (silent is False) or (debug is True):
+        overlap_check = pd.Series(to_match).isin(tt_pricetype['ttCode'])
+        
+        if (len(overlap_check) > 0) and (min(overlap_check) is False):
+            problem = (df[df['ttCode'].isin(to_match[~overlap_check])])[['Description','Perf date', 'ttCode']]
+            if not silent:
+                print('Warning: Price type data does not cover every show. Reasons this may occur:\n- The show was prior to 2018\n- The show was canceled/changed with tickets sold\n- The show is in the current or future month. Pricetype data is updated monthly.\nRows missing: ' + str(len(problem)))
+            if debug:
+                print(problem)
     
     result = tt_pricetype[tt_pricetype['ttCode'].isin(to_match)]
-    return(result.drop(['ttCode'], axis=1))
+    if not return_ttCode:
+        result = result.drop(['ttCode'], axis=1)
+    return(result)
     
 def add_unique_code(data):
 
@@ -544,7 +677,9 @@ def set_tt_pricetype(data):
 def resolve_string_date(date):
 
     # Function to take an inputted string date and return a
-    # datetime array. Used to expand shortcuts
+    # datetime array. Used to expand shortcuts.
+    # Available shortcuts: today, yesterday, tomorrow, future,
+    # CYXX (calendar year), FYXX (fiscal year)
     
     date = date.lower()
     
@@ -555,20 +690,28 @@ def resolve_string_date(date):
         if 'today' in date:
             today = datetime.datetime.today().strftime('%Y-%m-%d')
             dates.append(pd.to_datetime(today))
+        elif 'yesterday' in date:
+            today = datetime.datetime.today()
+            yesteday = (today - pd.Timedelta('1 day')).strftime('%Y-%m-%d')
+            dates.append(pd.to_datetime(yesteday))
+        elif 'tomorrow' in date:
+            today = datetime.datetime.today()
+            tomorrow = (today + pd.Timedelta('1 day')).strftime('%Y-%m-%d')
+            dates.append(pd.to_datetime(tomorrow))
         elif 'cy' in date: # Calendar year
             if len(date) == 4: # CYXX
                 year = int(date[2:4])
             else: # CY20XX
                 year = int(date[4:6])
-            dates.append(pd.to_datetime('20'+str(year-1)+'-12-31'))
-            dates.append(pd.to_datetime('20'+str(year+1)+'-01-01'))
+            dates.append(pd.to_datetime('20'+str(year)+'-01-01'))
+            dates.append(pd.to_datetime('20'+str(year)+'-12-31'))
         elif 'fy' in date: # Fiscal year
             if len(date) == 4: # FYXX
                 year = int(date[2:4])
             else: # FY20XX
                 year = int(date[4:6])
-            dates.append(pd.to_datetime('20'+str(year-1)+'-09-30'))
-            dates.append(pd.to_datetime('20'+str(year)+'-10-01'))
+            dates.append(pd.to_datetime('20'+str(year-1)+'-10-01'))
+            dates.append(pd.to_datetime('20'+str(year)+'-09-30'))
         elif date == 'future':
             today = datetime.datetime.today().strftime('%Y-%m-%d')
             dates.append(pd.to_datetime(today))
@@ -626,11 +769,13 @@ def search(data, name='', date='', time='', venue='', audience='',
     elif weekend:
         data = data[data['Perf date'].dt.weekday > 4]
 
+    # Find the unique columns so we can get lost columns back
+    unique = data.drop_duplicates(subset=['Description', 'Perf date']).sort_values(['Description', 'Perf date'])
     # Need to group by name and date before checking against summed values
-    data = data.groupby(['Description', 'Perf date']).sum().reset_index()
+    data = data.groupby(['Description', 'Perf date']).sum().reset_index().sort_values(['Description', 'Perf date'])
     # String columns are lost, so let's re-add them.
-    data = add_venue(data)
-    data = add_audience(data) 
+    data['Venue'] = unique['Venue'].values
+    data['Audience'] = unique['Audience'].values
     data = add_weekday(data)
             
     if len(time) > 0:
@@ -866,10 +1011,11 @@ def create_presale_model(data, curve_list, new_err=False):
         mean_by_day[i] = dslice['Frac sold'].mean()
         mad_by_day[i] = robust.mad(dslice['Frac sold'].values)
         i += 1
+        
     # Finalize columns
     collapsed['Frac sold'] = mean_by_day
     collapsed['Uncertainty'] = mad_by_day # median absolute deviation estimating the stdev
-    #print(collapsed)
+    
     # New error estimation    
     if new_err:
         err = np.zeros((len(fixed_curves),len(max_index)))
@@ -877,7 +1023,6 @@ def create_presale_model(data, curve_list, new_err=False):
         err_high = np.zeros((len(fixed_curves),len(max_index))) # Holds errors where the prediction was too high
         for i in range(len(fixed_curves)):
             for j in np.arange(1,len(max_index)):
-                #err = (project_sales(data, collapsed, (fixed_curves[i])['Total tickets'].values[-j], (fixed_curves[i])['Days efore'].values[-j], verbose=False)[0] - (fixed_curves[i])['Total tickets']).values[-1]/(fixed_curves[i])['Total tickets'].values[-1]
                 err = (_do_fit(collapsed, (fixed_curves[i]).iloc[:-j], project=True) - (fixed_curves[i])['Total tickets']).values[-1]/(fixed_curves[i])['Total tickets'].values[-1]
                 
                 if err >=0:
@@ -889,8 +1034,7 @@ def create_presale_model(data, curve_list, new_err=False):
 
         high_80 = np.nanpercentile(err_high, 80, axis = 0)
         low_80 = np.nanpercentile(err_low, 80, axis=0)
-        #err_80 = np.percentile(err, 80, axis=0)
-        #collapsed['New error'] = np.flip(err_80,axis=0)
+        
         collapsed['Error high'] = np.flip(high_80,axis=0)
         collapsed['Error low'] = np.flip(low_80,axis=0)
     collapsed = collapsed.drop(['Tickets', 'Total tickets'], axis=1)
@@ -1570,14 +1714,17 @@ class ttAccessor(object):
         self._obj = fix_names(self._obj)
         return(self._obj)
         
-    def get_member_data(self):
-        return(get_member_data(self._obj))
+    def get_member_data(self, **kwargs):
+        return(get_member_data(self._obj, **kwargs))
     
-    def get_age_data(self):
-        return(get_age_data(self._obj))
+    def get_age_data(self, **kwargs):
+        return(get_age_data(self._obj, **kwargs))
     
-    def get_group_data(self):
-        return(get_group_data(self._obj))
+    def get_group_data(self, **kwargs):
+        return(get_group_data(self._obj, **kwargs))
+    
+    def get_school_data(self, **kwargs):
+        return(get_school_data(self._obj, **kwargs))
     
     def get_pricing_data(self, **kwargs):
         return(get_pricing_data(self._obj, **kwargs))
