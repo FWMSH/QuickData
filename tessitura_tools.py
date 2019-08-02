@@ -62,8 +62,11 @@ def load_data(path):
         new_data = full_data[['Description', 'Perf date', 'Tickets', 'Revenue', 'Venue', 'Audience', 'Order date']]
 
     # Unpack the stored data for past months (pickled for performance)
-    old_data = pd.read_pickle(path + '/grouped_data.pkl')
-    old_data = old_data[old_data['Perf date'] > '2018-01-02'] # To avoid overlaps with hist_data
+    try:
+        old_data = pd.read_pickle(path + '/grouped_data.pkl')
+        old_data = old_data[old_data['Perf date'] > '2018-01-02'] # To avoid overlaps with hist_data
+    except:
+        old_data = pd.DataFrame()
     # Unpack the stored data from the historical file (Pre-2018)
     hist_data = pd.read_pickle(path + '/hist_combined.pkl')
     if len(files) > 0:
@@ -105,13 +108,13 @@ def add_venue(df):
                  'Rolling Stones at the Max', 'Journey to the South Paci',
                  'Born to be Wild', 'Dinosaurs Alive', 'D-Day: Normandy 1944',
                  'Backyard Wilderness', 'National Parks Adventure', 'Frozen', 'The Incredibles',
-                 'The Polar Express', 'Omni Admission', 'Moana',
+                 'The Polar Express', 'Omni Admission', 'Moana','Apollo 13',
                  'Superpower Dogs', 'Under the Sea', 'Apollo 11', 'Hidden Figures',
                  'Independence Day', 'Serenity','Fifth Element',
                  'How To Train Your Dragon', 'The Secret Life of Pets', 'Fantastic Beasts']
     omni = df.loc[df['Description'].isin(omni_list)]
     venues[omni.index] = 'Omni'
-    studios_list = ['Science on Tap', "FAMapalooza", 'Birthday Parties',
+    studios_list = ['Science on Tap', "FAMapalooza", 'Birthday Party',
                     'Reel Adventures','Polar Express PJ Party']
     studios = df.loc[df['Description'].isin(studios_list)]
     venues[studios.index] = 'Studios'
@@ -305,7 +308,7 @@ def fix_names(df):
                      'Brantley Hargrove Lecture', 'Paul Sutter Lecture', 'Michael Webber Lecture')
     df = df.replace(to_replace=celeb_lecture, value="Lecture Series")
     
-    live_at_the_museum = ('The Vince Lujan Project','Buffalo Ruckus','Danni and Kris', 'Center 313','Light Crust Doughboys')
+    live_at_the_museum = ('The Vince Lujan Project','Buffalo Ruckus','Danni and Kris', 'Center 313','Light Crust Doughboys', 'Douglas, Padgett, Stice & Li')
     df = df.replace(to_replace=live_at_the_museum, value="Live at the Museum")
     
     famipalooza = ('FAMapalooza: Bubble Festival', 'FAMapalooza: Beat the Heat',
@@ -315,8 +318,11 @@ def fix_names(df):
     polar_pj = ('Polar Express Pajama Party')
     df = df.replace(to_replace=polar_pj, value="Polar Express PJ Party")
     
-    science_on_tap = ('Science on Tap: Sweet & Savory')
+    science_on_tap = ('Science on Tap: Sweet & Savory', 'SoT: Grown Up Summer Camp','SoT: Moonwalk')
     df = df.replace(to_replace=science_on_tap, value="Science on Tap")
+    
+    msb = ('Mad Scientist Ball 2019')
+    df = df.replace(to_replace=msb, value="Mad Scientist Ball")
     
     return(df)
     
@@ -383,7 +389,7 @@ def get_yoy(data, **kwargs):
     if isinstance(date, str):
         date = resolve_string_date(date)
     elif isinstance(date, list):
-        date = pd.to_DatetimeIndex(date)
+        date = pd.DatetimeIndex(date)
     cur_args['date'] = date
     cur_result = search(data, **cur_args)
     
@@ -395,7 +401,6 @@ def get_yoy(data, **kwargs):
     past_result = search(data, **past_args)
     
     result = pd.DataFrame()
-    #result['Period'] = 
     result['Period'] = [cur_args['date'][0].strftime('%Y-%m-%d')+' - '+cur_args['date'][1].strftime('%Y-%m-%d'), past_args['date'][0].strftime('%Y-%m-%d')+' - '+past_args['date'][1].strftime('%Y-%m-%d'), 'Year-over-year']
     
     cur_tick = cur_result['Tickets'].sum()
@@ -407,8 +412,201 @@ def get_yoy(data, **kwargs):
     result['Revenue'] = [cur_rev, past_rev, -1*(past_rev-cur_rev)/past_rev]
     
     return(result)
-    
 
+def create_yoy_chart(data, **kwargs):
+
+    # Function to make a year-over-year plot. Passes the search terms given
+    # to get_yoy() and makes a plot of the result. Set dashboard=True to
+    # produce files with very large labels
+    
+    # Clear the current figure
+    plt.clf()
+    
+    if 'date' not in kwargs:
+        print('create_yoy_chart: error: must specifiy a date range to get a year-over-year result')
+        return(pd.DataFrame())
+    elif isinstance(kwargs['date'], str):
+        dt = resolve_string_date(kwargs['date'])
+    else: 
+        dt = kwargs['date']
+        
+    date = str(dt[0].date())+':'+str(dt[1].date())
+        
+    result = get_yoy(data, **kwargs)
+    
+    title = 'Year-over-year: '
+    i = 0
+    if 'name' in kwargs:
+        title += kwargs['name']
+        i += 1
+    if 'venue' in kwargs:
+        if i > 0:
+            title += ', venue='
+        title += kwargs['venue']
+        i += 1
+    if 'audience' in kwargs:
+        if i > 0:
+            title += ', audience='
+        title += kwargs['audience']
+    
+    title += ' ('+ date + ')'
+    
+    if 'title' in kwargs:
+        title = kwargs['title']
+    
+    yoy = result.iloc[2] # The YoY row
+    
+    if ('dashboard' in kwargs) and (kwargs['dashboard'] == True):
+        title_fontsize = 50
+        ticks_fontsize = 25
+        label_fontsize = 30
+    else:
+        title_fontsize = 25
+        ticks_fontsize = 15
+        label_fontsize = 20
+    
+    plt.bar([0, 1], [100*yoy['Tickets'], 100*yoy['Revenue']], tick_label=['Tickets', 'Revenue'])
+    
+    locs, labels = plt.yticks()
+    mag = max(abs(locs))
+    plt.ylim([-1*mag, mag])
+    plt.xticks(fontsize=label_fontsize)
+    plt.yticks(fontsize=ticks_fontsize)
+    plt.title(title, fontsize=title_fontsize)
+    plt.ylabel('Percent change', fontsize=label_fontsize)
+    plt.axhline(0, color="black") # Add a dark line at zero
+    
+    if 'filename' in kwargs:
+        plt.savefig(kwargs['filename'], dpi=300)
+    
+    return(plt.gcf())
+    
+def create_dashboard_chart(data, type, **kwargs):
+
+    # Function to make a single year-over-year plot for Exhibits, Omni, Noble
+    # Type is one of:
+    # 'fiscal': Fiscal year-to-date
+    # 'month': rolling 30-day windows
+    
+    # Clear the current figure
+    plt.clf()
+    
+    if type == 'fiscal':
+        date = '2018-10-01:yesterday'
+        title = 'FY19  YoY Change'
+    elif type == 'month':
+        date = [datetime.datetime.today()-pd.Timedelta('31 days'), datetime.datetime.today()-pd.Timedelta('1 day')]
+        title = 'Trailing Month YoY Change'
+        
+    exhib = get_yoy(data, name='General Admission', date=date)
+    omni = get_yoy(data, venue='Omni', date=date)
+    noble = get_yoy(data, venue='Noble', date=date)
+    
+    exhib_yoy = exhib.iloc[2] # The YoY row
+    omni_yoy = omni.iloc[2]
+    noble_yoy = noble.iloc[2]
+    
+    title_fontsize = 50
+    ticks_fontsize = 25
+    label_fontsize = 30
+    
+    plt.bar([.25, 2], [100*exhib_yoy['Tickets'], 100*exhib_yoy['Revenue']], width=0.5, align='edge', label='Exhibits')
+    plt.bar([.75, 2.5], [100*omni_yoy['Tickets'], 100*omni_yoy['Revenue']], width=0.5, align='edge', label='Omni')
+    plt.bar([1.25, 3], [100*noble_yoy['Tickets'], 100*noble_yoy['Revenue']], width=0.5, align='edge', label='Noble')
+    
+    
+    locs, labels = plt.yticks()
+    mag = max(abs(locs))
+    plt.ylim([-1*mag, mag])
+    plt.xticks([1,2.75], ['Tickets', 'Revenue'], fontsize=label_fontsize)
+    plt.yticks(fontsize=ticks_fontsize)
+    plt.title(title, fontsize=title_fontsize)
+    plt.ylabel('Percent change', fontsize=label_fontsize)
+    plt.axhline(0, color="black") # Add a dark line at zero
+    
+    plt.legend(fontsize=label_fontsize)
+    
+    if 'filename' in kwargs:
+        plt.savefig(kwargs['filename'], dpi=300)
+    
+    return(plt.gcf())
+    
+def get_historical(data, n_yr, **kwargs):
+
+    # Function to compare data for the same time period over several years.
+    # Pass keywords as if you were using search(). A search will then be executed
+    # for the number of years given by n_yr, inclusive of the specified search.
+    # I.e., n_yr=2 looks back one year, which is the same as get_yoy()
+
+
+    if 'date' not in kwargs:
+        print('get_historical: error: must specifiy a date range to get a year-over-year result')
+        return(pd.DataFrame())
+    
+    # These are the inputed arguments, assumed to the present reference frame
+    cur_args = kwargs.copy()
+    date = cur_args['date']
+    if isinstance(date, str):
+        date = resolve_string_date(date)
+    elif isinstance(date, list):
+        date = pd.DatetimeIndex(date)
+    cur_args['date'] = date
+    cur_result = search(data, **cur_args)
+    
+    period_list = list()
+    tickets_list = list()
+    revenue_list = list()
+    
+    for i in range(n_yr):
+        past_args = cur_args.copy()
+        date = past_args['date']
+        shifted_date = date - pd.DateOffset(years=i)
+        past_args['date'] = shifted_date
+        past_result = search(data, **past_args)
+        
+        # Add the results from this year to the lists
+        period_list.append(past_args['date'][0].strftime('%Y-%m-%d')+' - '+past_args['date'][1].strftime('%Y-%m-%d'))
+        tickets_list.append(past_result['Tickets'].sum())
+        revenue_list.append(past_result['Revenue'].sum())
+        
+    results = pd.DataFrame()
+    results['Period'] = period_list
+    results['Tickets'] = tickets_list
+    results['Revenue'] = revenue_list
+    
+    return(results)
+    
+def create_historical_plot(data, n_yr, **kwargs):
+
+    # Performs a search with get_historical() and plots the results.
+    
+    # Clear the current figure
+    plt.clf()
+    
+    result = get_historical(data, n_yr, **kwargs)
+    
+    title = ''
+    i = 0
+    if 'name' in kwargs:
+        title += kwargs['name']
+        i += 1
+    if 'venue' in kwargs:
+        if i > 0:
+            title += ', venue='
+        title += kwargs['venue']
+        i += 1
+    if 'audience' in kwargs:
+        if i > 0:
+            title += ', audience='
+        title += kwargs['audience']
+    
+    plt.barh(np.arange(0,n_yr*2,2), result['Tickets'], tick_label=result['Period'], align='edge', label='Tickets')
+    plt.barh(np.arange(.8,n_yr*2,2), result['Revenue'], tick_label=result['Period'], align='edge', label='Revenue')
+    plt.title(title)
+    plt.legend()
+    
+    return(plt.gcf())    
+    
 def get_age_data(data, get='', debug=False):
     
     # Function to return the number of tickets sold to adults and kids.
@@ -718,7 +916,12 @@ def resolve_string_date(date):
             future = (datetime.datetime.today() + pd.Timedelta('365 day')).strftime('%Y-%m-%d')
             dates.append(pd.to_datetime(future))
         else:
-            dates.append(pd.to_datetime(date))
+            try:
+                nd = pd.to_datetime(date)
+                dates.append(pd.to_datetime(nd))
+            except:
+                print('resolve_string_date: warning : date "' + date + '" is not valid and has been ignored')
+            
         
     if len(dates) < 3:
         return(pd.to_datetime(dates))
@@ -729,11 +932,10 @@ def resolve_string_date(date):
         
 def search(data, name='', date='', time='', venue='', audience='',
             tickets='', revenue='', day_of_week=-1, weekday=False,
-            weekend=False, group='', attach=False):
+            weekend=False, group='', attach=False, **kwargs):
 
     # This function returns a dateframe that filters the overall
-    # dataset based on the specified parameters. If you know the
-    # show you're looking for, use get_show
+    # dataset based on the specified parameters.
     
     all_data = data.copy()
     
@@ -840,28 +1042,45 @@ def search(data, name='', date='', time='', venue='', audience='',
     
     return(data)
     
-def get_show(data, name, summarize=False, all=False):
+def get_accounting_ledger(data, to_match):
+
+    # Function to take the output of a search (to_match) and build a DataFrame
+    # in the style of an accounting ledger, where each transaction is recorded
+    # on the day it occurs rather than the day of the event.
     
-    # Function to return all instances of a given show across  
-    # order and perf dates. Set summarize=True to group by perf
-    # date. By default, only events in the future are returned.
-    # Set all=True to also retrieve past events.
+    # Loop through the events to match and get the full purchase recorded
+    combo = pd.DataFrame()
+    for i in range(len(to_match)):
+        name = (to_match.iloc[i])['Description']
+        perf_date = (to_match.iloc[i])['Perf date']
+        combo = combo.append(get_performance(data,name, perf_date))
+        
+    combo = combo.groupby('Order date').sum().reset_index().drop('Tickets', axis=1)
+    #return(combo.sort_values('Order date'))
+    return(combo)    
     
-    if all:
-        result = data[data['Description'] == name]   
-    else:
-        result = data[(data['Description'] == name) & (data['Perf date'] > datetime.datetime.now())]      
-    if summarize:
-        temp = result.groupby('Perf date').sum().reset_index()
-        temp['Description'] = name
-        temp = add_venue(temp)
-        temp = add_audience(temp)
-        result = temp[['Description','Perf date', 'Tickets', 'Revenue', 'Venue',
-                        'Audience']]
+# def get_show(data, name, summarize=False, all=False):
+    
+    # # Function to return all instances of a given show across  
+    # # order and perf dates. Set summarize=True to group by perf
+    # # date. By default, only events in the future are returned.
+    # # Set all=True to also retrieve past events.
+    
+    # if all:
+        # result = data[data['Description'] == name]   
+    # else:
+        # result = data[(data['Description'] == name) & (data['Perf date'] > datetime.datetime.now())]      
+    # if summarize:
+        # temp = result.groupby('Perf date').sum().reset_index()
+        # temp['Description'] = name
+        # temp = add_venue(temp)
+        # temp = add_audience(temp)
+        # result = temp[['Description','Perf date', 'Tickets', 'Revenue', 'Venue',
+                        # 'Audience']]
         
-    result = result.sort_values('Perf date')
+    # result = result.sort_values('Perf date')
         
-    return(result)
+    # return(result)
 
 def get_performance(data, name, perf_date, fast=False, summarize=False):
     
@@ -1272,7 +1491,7 @@ def project_sales_path(data, model, input1, input2,
         fit = False
     else:
         print('project_sales_path: error: must pass either name/date as string or sold/days_out as int')
-        return()
+        return(([],[]))
     
     if fit:
         sales_curve = get_sales_curve(data, input1, input2, pad=True)
@@ -1291,6 +1510,9 @@ def project_sales_path(data, model, input1, input2,
         return(model['Days before'].values, path.values)
     else:
         day_index = np.where(model['Days before'].values == days_out)[0]
+        if len(day_index) == 0:
+            print('project_sales_path: error: No days to project!')
+            return(([],[]))
         return(model['Days before'].values[day_index[0]:], path.values[day_index[0]:])
 
 def _preset_models(data, name, list=False, new_err=False):
@@ -1303,6 +1525,8 @@ def _preset_models(data, name, list=False, new_err=False):
                            ('Science on Tap', '2018-07-20'),
                            ('Science on Tap', '2018-10-12'),
                            ('Science on Tap', '2019-03-30'),
+                           ('Science on Tap', '2019-06-21'),
+                           ('Science on Tap', '2019-07-19'),
                            ('Give Back Game Night', '2018-08-18'),
                            ('Reel Adventures', '2018-05-12'),
                            ('Reel Adventures', '2018-05-18'),
@@ -1326,6 +1550,8 @@ def _preset_models(data, name, list=False, new_err=False):
                            ('Science on Tap', '2018-07-20'),
                            ('Science on Tap', '2018-10-12'),
                            ('Science on Tap', '2019-03-30'),
+                           ('Science on Tap', '2019-06-21'),
+                           ('Science on Tap', '2019-07-19'),
                            ('Give Back Game Night', '2018-08-18')],
                            
               'lecture':  [('Lecture Series', '2019-04-15'),
@@ -1347,7 +1573,7 @@ def _preset_models(data, name, list=False, new_err=False):
             return(pd.DataFrame())
                  
         
-def create_model_chart(data, model_name, filename='', active=[], simple=False, title=''):
+def create_model_chart(data, model_name, filename='', active=[], annotate=False, simple=False, title=''):
     
     # Function to plot the model for a given curve list and
     # all of the data that went into it. Curves passed to
@@ -1375,8 +1601,11 @@ def create_model_chart(data, model_name, filename='', active=[], simple=False, t
     # Recursively plot the curves from active
     for curve in active:
         temp = get_sales_curve(data, curve[0], curve[1], max_tickets=int(curve[2]), pad=True)
-        plt.plot(temp['Days before'], 100*temp['Frac sold'], label=curve[0] + ' ' + curve[1])
-
+        if len(temp) > 0: # Show actually exists with sales
+            plt.plot(temp['Days before'], 100*temp['Frac sold'], label=curve[0] + ' ' + curve[1])
+            if annotate:
+                plt.annotate(str(int(temp['Total tickets'].iloc[-1])),xy=(temp['Days before'].iloc[-1], 100*temp['Frac sold'].iloc[-1]), xytext=(4,-8), textcoords='offset points')
+        
     if len(active) > 0:
         plt.legend()
     plt.ylim([0,100])
@@ -1447,6 +1676,8 @@ def create_sales_chart(*args,
                        frac=False,
                        end_on_event=True,
                        filename='',
+                       color_all=True,
+                       dashboard=False,
                        max_tickets=0):
     
     # Function to plot the sales curves for given events/
@@ -1454,7 +1685,9 @@ def create_sales_chart(*args,
     # (perf_name, perf_date, max_tickets) with max_tickets
     # being an optional parameter. Set annotate=True to 
     # label each curve with the current number of sales 
-    # (only if frac=False).
+    # (only if frac=False). Set color_all=False to turn
+    # past events into gray lines and only future events 
+    # into colored ones.
     
     # Clear the figure
     plt.clf()
@@ -1494,16 +1727,34 @@ def create_sales_chart(*args,
             for i in range(len(args[1])):
                 curve_list.append((name[i], date[i]))
                 
+    # Set larger font size if plotting for dashboard
+    if dashboard is True:
+        title_fontsize = 50
+        ticks_fontsize = 25
+        label_fontsize = 30
+        linewidth = 5
+    else:
+        title_fontsize = 25
+        ticks_fontsize = 20
+        label_fontsize = 20
+        linewidth = 3
+    
     # Recursively plot the curves
     if not frac: # We're plotting the total number of tickets
         for curve in curve_list:
             temp = get_sales_curve(data, curve[0], curve[1], pad=True)
-
-            plt.plot(temp['Days before'], temp['Total tickets'], label=curve[0] + ' ' + str(curve[1]))
+            
+            color = None # Use the next color on the palette
+            label = curve[0] + ' ' + str(curve[1])
+            if (not color_all) and (curve[1] < datetime.datetime.today()):
+                color = '.8'
+                label = '_nolegend_'
+            
+            plt.plot(temp['Days before'], temp['Total tickets'], label=label, color=color, linewidth=linewidth)
             num = temp['Total tickets'].iloc[-1]
             if annotate:
-                plt.annotate(str(int(num)),xy=(temp['Days before'].iloc[-1], num), xytext=(4,-8), textcoords='offset points')
-        plt.ylabel('Tickets sold')
+                plt.annotate(str(int(num)),xy=(temp['Days before'].iloc[-1], num), xytext=(4,-8), textcoords='offset points', fontsize=label_fontsize)
+        plt.ylabel('Tickets sold', fontsize=label_fontsize)
         
     else:
         for curve in curve_list:
@@ -1511,12 +1762,21 @@ def create_sales_chart(*args,
                 temp = get_sales_curve(data, curve[0], curve[1], max_tickets=int(curve[2]))
             else: # No max tickets supplied
                 temp = get_sales_curve(data, curve[0], curve[1])            
-            plt.plot(temp['Days before'], 100*temp['Frac sold'], label=curve[0] + ' ' + str(curve[1]))
+            
+            color = None # Use the next color on the palette
+            label = curve[0] + ' ' + str(curve[1])
+            if (not color_all) and (curve[1] < datetime.datetime.today()):
+                color = '.8'
+                label = '_nolegend_'
+            
+            plt.plot(temp['Days before'], 100*temp['Frac sold'], label=label, color=color, linewidth=linewidth)
         plt.ylabel('Percent of tickets sold')
     
-    plt.xlabel('Days until event')
-    plt.title(title)
-    legend = plt.legend(frameon=1)
+    plt.xlabel('Days until event', fontsize=label_fontsize)
+    plt.title(title, fontsize=title_fontsize)
+    plt.xticks(fontsize=ticks_fontsize)
+    plt.yticks(fontsize=ticks_fontsize)
+    legend = plt.legend(frameon=1, loc='upper left', fontsize=ticks_fontsize)
     frame = legend.get_frame()
     frame.set_color('white')
     frame.set_facecolor('white')
@@ -1541,12 +1801,13 @@ def create_sales_chart(*args,
     return(fig)
     
 def create_projection_chart(data, model, name, perf_date,
+                            dashboard=False,
                             filename='',
                             fit=True,
                             max_tickets=0, 
                             pad=True,
-                            #tight=False,
                             simple=False,
+                            print_daily_projections=False,
                             title=''):
     
     # Function to create a chart that plots the past and predicted sales
@@ -1636,10 +1897,27 @@ def create_projection_chart(data, model, name, perf_date,
                                                   int(perf_curve['Days before'].iloc[-1]), 
                                                   max_tickets=max_tickets, 
                                                   full=full_bool)
+    
+    if print_daily_projections:
+        print('Days out Tcikets sold')
+        print('---------------------')
+        for i in range(len(path_days)-1):
+            print(str(abs(int(path_days[i+1]))).ljust(8,' '), str(int(round(path_proj[i+1]))))
+    
     # This forces the sales path to connect with the number of current sales. If fit=False,
     # this just sets the same value over again.
     if simple:
         path_proj[0] = (perf_curve.iloc[-1])['Total tickets']
+    
+    # Set larger font size if plotting for dashboard
+    if dashboard is True:
+        title_fontsize = 50
+        ticks_fontsize = 25
+        label_fontsize = 30
+    else:
+        title_fontsize = 25
+        ticks_fontsize = 20
+        label_fontsize = 20
     
     plt.plot(path_days, path_proj, 
         color=pal[2], label='Model', linewidth=6)
@@ -1652,35 +1930,31 @@ def create_projection_chart(data, model, name, perf_date,
     
     plt.annotate(str(int(perf_curve['Total tickets'].iloc[-1])),
                  xy=(perf_curve['Days before'].iloc[-1], perf_curve['Total tickets'].iloc[-1]),
-                 xytext=(0,-20), textcoords='offset points')
-    plt.annotate(str(int(proj)),xy=(0, proj), xytext=(8,-8), textcoords='offset points')
-    plt.annotate(str(int(low)),xy=(0, low), xytext=(8,-8), textcoords='offset points')
+                 xytext=(0,-20), textcoords='offset points', fontsize=ticks_fontsize)
+    plt.annotate(str(int(proj)),xy=(0, proj), xytext=(8,-8), textcoords='offset points', fontsize=ticks_fontsize)
+    plt.annotate(str(int(low)),xy=(0, low), xytext=(8,-8), textcoords='offset points', fontsize=ticks_fontsize)
     if np.isfinite(high):
-        plt.annotate(str(int(high)),xy=(0, high), xytext=(8,-8), textcoords='offset points')
+        plt.annotate(str(int(high)),xy=(0, high), xytext=(8,-8), textcoords='offset points', fontsize=ticks_fontsize)
 
     plt.ylim((0,1.05*max_tickets))
-    plt.xlabel('Days until event')
-    plt.ylabel('Projected attendence')
+    plt.xlabel('Days until event', fontsize=label_fontsize)
+    plt.ylabel('Projected attendence', fontsize=label_fontsize)
+    plt.xticks(fontsize=ticks_fontsize)
+    plt.yticks(fontsize=ticks_fontsize)
     if title == '':
-        plt.title(str(name) + ' ' + str(perf_date))
+        plt.title(str(name) + ' ' + str(perf_date), fontsize=title_fontsize)
     else:
-        plt.title(title)
-    legend = plt.legend(frameon=1)
+        plt.title(title, fontsize=title_fontsize)
+    
+    legend = plt.legend(frameon=1, fontsize=ticks_fontsize)
     frame = legend.get_frame()
     frame.set_color('white')
     frame.set_facecolor('white')
     frame.set_edgecolor('white')
     
     plt.xlim((min(perf_curve['Days before'])-1,1))
-    # if tight: # Overrides xlim from above
-        # # For events with very long sales histories; set plot lims to match model length.
-        # useful = path_days[path_proj > 0]
-        # if len(useful) > 0:
-            # plt.xlim(min(useful)-1, 1)
-        # else:
-            # print('create_projection_chart: warning: cannot create tight plot because model is always zero. This will resolve itself closer to the event.')
     
-    if simple:
+    if simple and not dashboard:
         # Add an explainer to the bottom of the chart
         plt.figtext(0.1, -0.0375,
                     'The green dots mark the number of actual tickets sold so far.\nThe blue dot is the predicted final sales and the blue line is the range of reasonable possibilities.\nThe orange line shows the expected path of ticket sales from today to the final projection.',
@@ -1732,11 +2006,20 @@ class ttAccessor(object):
     def get_yoy(self, **kwargs):
         return(get_yoy(self._obj, **kwargs))
     
+    def create_yoy_chart(self, **kwargs):
+        return(create_yoy_chart(self._obj, **kwargs))
+    
+    def get_historical(self, n_yr, **kwargs):
+        return(get_historical(self._obj, n_yr, **kwargs))
+    
+    def create_historical_plot(self, n_yr, **kwargs):
+        return(create_historical_plot(self._obj, n_yr, **kwargs))
+    
     def search(self, **kwargs):
         return(search(self._obj, **kwargs))
             
-    def get_show(self, *args, **kwargs):
-        return(get_show(self._obj, *args, **kwargs))
+    # def get_show(self, *args, **kwargs):
+        # return(get_show(self._obj, *args, **kwargs))
     
     def get_performance(self, *args, **kwargs):
         return(get_performance(self._obj, *args, **kwargs))

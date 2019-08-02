@@ -11,3 +11,5 @@ dependencies:
     - simple-crypt
     - openpyxl
     - scipy
+    - glob
+    - zipfile
