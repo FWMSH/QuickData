@@ -111,7 +111,8 @@ def add_venue(df):
                  'The Polar Express', 'Omni Admission', 'Moana','Apollo 13',
                  'Superpower Dogs', 'Under the Sea', 'Apollo 11', 'Hidden Figures',
                  'Independence Day', 'Serenity','Fifth Element',
-                 'How To Train Your Dragon', 'The Secret Life of Pets', 'Fantastic Beasts']
+                 'How To Train Your Dragon', 'The Secret Life of Pets', 'Fantastic Beasts',
+                 'Back to the Future', 'Spaceballs']
     omni = df.loc[df['Description'].isin(omni_list)]
     venues[omni.index] = 'Omni'
     studios_list = ['Science on Tap', "FAMapalooza", 'Birthday Party',
@@ -915,6 +916,10 @@ def resolve_string_date(date):
             dates.append(pd.to_datetime(today))
             future = (datetime.datetime.today() + pd.Timedelta('365 day')).strftime('%Y-%m-%d')
             dates.append(pd.to_datetime(future))
+        elif date == 'past':
+            today = datetime.datetime.today().strftime('%Y-%m-%d')
+            dates.append(pd.to_datetime('2014-09-29'))
+            dates.append(pd.to_datetime(today) - pd.Timedelta('1 day'))
         else:
             try:
                 nd = pd.to_datetime(date)
@@ -1018,10 +1023,6 @@ def search(data, name='', date='', time='', venue='', audience='',
         
     if len(audience) > 0:
         data = data[data['Audience'] == audience]
-    
-    #if len(data['Description'].unique()) > 1:
-    #    print('Table contains:')
-    #    print(data['Description'].unique())
         
     if group != '':
         if group.lower() in ['d', 'w', 'm', 'y', 'a-sep']:
@@ -1527,6 +1528,7 @@ def _preset_models(data, name, list=False, new_err=False):
                            ('Science on Tap', '2019-03-30'),
                            ('Science on Tap', '2019-06-21'),
                            ('Science on Tap', '2019-07-19'),
+                           ('Science on Tap', '2019-08-16'),
                            ('Give Back Game Night', '2018-08-18'),
                            ('Reel Adventures', '2018-05-12'),
                            ('Reel Adventures', '2018-05-18'),
@@ -1552,6 +1554,7 @@ def _preset_models(data, name, list=False, new_err=False):
                            ('Science on Tap', '2019-03-30'),
                            ('Science on Tap', '2019-06-21'),
                            ('Science on Tap', '2019-07-19'),
+                           ('Science on Tap', '2019-08-16'),
                            ('Give Back Game Night', '2018-08-18')],
                            
               'lecture':  [('Lecture Series', '2019-04-15'),
@@ -1965,6 +1968,80 @@ def create_projection_chart(data, model, name, perf_date,
         
     #plt.show()
     return(plt.gcf())
+    
+def general_projection(data, type, date_range, adjust=True):
+
+    # Function to use past data to project future performance.
+    # type can be one of ['General Admission', 'Omni', 'Noble']
+    # For each week in the specified range, the data from the 
+    # same period in the prior year is adjusted based on
+    # YoY performance from the last three months.
+    # Set adjust=False to use the past data without any YoY
+    # adjustment
+    
+    if isinstance(date_range, str):
+        date_range = resolve_string_date(date_range)
+    elif isinstance(date_range, list):
+        date_range = pd.DatetimeIndex(date)    
+        
+    # Adjust date range to be the prior year
+    past_date = date_range - pd.DateOffset(years=1)
+    
+    # Get date range for trailing 84-day period (12 weeks).
+    trailing_date = [datetime.datetime.today()-pd.Timedelta('84 days'), datetime.datetime.today()-pd.Timedelta('1 day')]
+    
+    error = False
+    if type == 'General Admission':
+        if adjust:
+            yoy = get_yoy(data, name='General Admission', date=trailing_date)
+            
+            yoy_tick = yoy['Tickets'].iloc[2]
+            yoy_rev = yoy['Revenue'].iloc[2]
+        else:
+            yoy_tick = 0
+            yoy_rev = 0
+        
+        past_data = search(data, name='General Admission', date=past_date, group='w')        
+    elif type == 'Omni':
+        if adjust:
+            yoy = get_yoy(data, venue='Omni', date=trailing_date)
+            
+            yoy_tick = yoy['Tickets'].iloc[2]
+            yoy_rev = yoy['Revenue'].iloc[2]
+        else:
+            yoy_tick = 0
+            yoy_rev = 0
+        
+        past_data = search(data, venue='Omni', date=past_date, group='w')
+        
+    elif type == 'Noble':
+        if adjust:
+            yoy = get_yoy(data, venue='Noble', date=trailing_date)
+            
+            yoy_tick = yoy['Tickets'].iloc[2]
+            yoy_rev = yoy['Revenue'].iloc[2]
+        else:
+            yoy_tick = 0
+            yoy_rev = 0
+        
+        past_data = search(data, venue='Noble', date=past_date, group='w')
+        
+    else:
+        print("general_projection: error: type must be one of 'General Admission', 'Omni', 'Noble'")
+        error = True
+        yoy_rev = 0
+        yoy_tick = 0
+    
+    if not error:
+        adjusted_data = past_data.copy()
+        adjusted_data['Perf date'] = adjusted_data['Perf date'] + pd.DateOffset(years=1) - pd.DateOffset(days=1)
+        adjusted_data['Revenue'] = np.round(adjusted_data['Revenue'].values*(1+yoy_rev),2)
+        adjusted_data['Tickets'] = np.round(adjusted_data['Tickets'].values*(1+yoy_tick))
+        
+        return(adjusted_data)
+    else:
+        return(pd.DataFrame())
+    
     
 # This binds the methods to the DataFrame objects
 @pd.api.extensions.register_dataframe_accessor("tt")
