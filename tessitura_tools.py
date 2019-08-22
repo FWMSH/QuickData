@@ -300,7 +300,7 @@ def fix_names(df):
     df = df.replace(to_replace=omni_dream, value="Dream Big")
         
     reel_adv = ('RA Harry Potter 4', 'Reel Adventures', 'RA Night at the Museum',
-                "Reel Adventures: Harry Potter",
+                "Reel Adventures: Harry Potter", 'RA Harry Potter 2',
                 'RA: Night at the Museum', 'Reel Adventures Harry Potter 4', 'RA Harry Potter 1')
     df = df.replace(to_replace=reel_adv, value="Reel Adventures")
     
