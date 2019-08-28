@@ -933,7 +933,28 @@ def resolve_string_date(date):
     else:
         print('resolve_string_date: Error: Too many dates!')
         return(pd.to_datetime([]))
-        
+
+def _expand_omni_alias(alias):
+    
+    # This internal function returns a list of Omni show
+    # names matching a given alias. Available aliases:
+    # 'OMNI_DOCUMENTARY', 'OMNI_FEATURE', 'OMNI_OTHER'
+    # The special alias of 'ALIAS_KEYS' returns a list of 
+    # available aliases
+    
+    alias_dict = {'OMNI_DOCUMENTARY': ['Superpower Dogs', 'Under the Sea', 'Tornado Alley', 'Dinosaurs Alive','Jerusalem','Lewis & Clark: Great Journey', 'Born to be Wild','Dolphins', 'Apollo 11','D-Day: Normandy 1944','Dream Big','Backyard Wilderness','National Parks Adventure','Pandas','Coral Reef Adventure',"America's Musical Journey", 'Flight of the Butterflies'],
+                  'OMNI_FEATURE': ['Back to the Future','Spaceballs','Jaws','Apollo 13', 'Independence Day', 'Serenity','Fifth Element', 'Hidden Figures','Fantastic Beasts','The Incredibles', 'How To Train Your Dragon','The Secret Life of Pets', 'Frozen','Moana', 'The Polar Express', 'Coco', 'Night at the Museum','Star Wars VIII: The Last Jedi', 'Rolling Stones at the Max'],
+                  'OMNI_OTHER': ['Omni Admission']
+                }
+                
+    if alias is 'ALIAS_KEYS':
+        return(alias_dict.keys())
+    elif alias in alias_dict:
+        return(alias_dict[alias])
+    else:
+        print('_expand_omni_alias: error: alias not found! Available aliases:')
+        print(alias_dict.keys())
+        return([])
         
 def search(data, name='', date='', time='', venue='', audience='',
             tickets='', revenue='', day_of_week=-1, weekday=False,
@@ -945,13 +966,22 @@ def search(data, name='', date='', time='', venue='', audience='',
     all_data = data.copy()
     
     if len(name) > 0:
+        # Get the available Omni aliases
+        omni_aliases = _expand_omni_alias('ALIAS_KEYS')
+        
         if isinstance(name, list):
             match_list = list()
             for item in name:
-                match_list.append(data[data['Description'].str.lower().str.contains(item.lower())])
+                if item in omni_aliases:
+                   match_list.append(data[data['Description'].isin(_expand_omni_alias(item))])
+                else:
+                    match_list.append(data[data['Description'].str.lower().str.contains(item.lower())])
             data = pd.concat(match_list)
         else:
-            data = data[data['Description'].str.lower().str.contains(name.lower())]
+            if name in omni_aliases:
+                data = data[data['Description'].isin(_expand_omni_alias(name))]
+            else:
+                data = data[data['Description'].str.lower().str.contains(name.lower())]
    
     if len(date) > 0: # We were passed a date 
         if isinstance(date, str):
@@ -1204,9 +1234,16 @@ def create_presale_model(data, curve_list, new_err=False):
     
     # Fetch the sales curve for each event
     curves = list()
-    for curve in curve_list:
-        temp = get_sales_curve(data, curve[0], curve[1], end_on_event=True)
-        curves.append(temp)
+    
+    if isinstance(curve_list, list):
+        for curve in curve_list:
+            temp = get_sales_curve(data, curve[0], curve[1], end_on_event=True)
+            curves.append(temp)
+    elif isinstance(curve_list, pd.DataFrame):
+        for i in range(len(curve_list)):
+            curve = curve_list.iloc[i]
+            temp = get_sales_curve(data, curve['Description'], curve['Perf date'], end_on_event=True)
+            curves.append(temp)
         
     # Re-index all curves to have the length of the longest
     fixed_curves = list()
