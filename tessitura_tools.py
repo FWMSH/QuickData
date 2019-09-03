@@ -112,7 +112,7 @@ def add_venue(df):
                  'Superpower Dogs', 'Under the Sea', 'Apollo 11', 'Hidden Figures',
                  'Independence Day', 'Serenity','Fifth Element',
                  'How To Train Your Dragon', 'The Secret Life of Pets', 'Fantastic Beasts',
-                 'Back to the Future', 'Spaceballs']
+                 'Back to the Future', 'Spaceballs', 'Bugs!']
     omni = df.loc[df['Description'].isin(omni_list)]
     venues[omni.index] = 'Omni'
     studios_list = ['Science on Tap', "FAMapalooza", 'Birthday Party',
@@ -324,6 +324,9 @@ def fix_names(df):
     
     msb = ('Mad Scientist Ball 2019')
     df = df.replace(to_replace=msb, value="Mad Scientist Ball")
+    
+    bugs = ('Bugs! A Rainforest Adven')
+    df = df.replace(to_replace=bugs, value="Bugs!")
     
     return(df)
     
@@ -942,7 +945,7 @@ def _expand_omni_alias(alias):
     # The special alias of 'ALIAS_KEYS' returns a list of 
     # available aliases
     
-    alias_dict = {'OMNI_DOCUMENTARY': ['Superpower Dogs', 'Under the Sea', 'Tornado Alley', 'Dinosaurs Alive','Jerusalem','Lewis & Clark: Great Journey', 'Born to be Wild','Dolphins', 'Apollo 11','D-Day: Normandy 1944','Dream Big','Backyard Wilderness','National Parks Adventure','Pandas','Coral Reef Adventure',"America's Musical Journey", 'Flight of the Butterflies'],
+    alias_dict = {'OMNI_DOCUMENTARY': ['Superpower Dogs', 'Under the Sea', 'Tornado Alley', 'Dinosaurs Alive','Jerusalem','Lewis & Clark: Great Journey', 'Born to be Wild','Dolphins', 'Apollo 11','D-Day: Normandy 1944','Dream Big','Backyard Wilderness','National Parks Adventure','Pandas','Coral Reef Adventure',"America's Musical Journey", 'Flight of the Butterflies', 'Bugs!'],
                   'OMNI_FEATURE': ['Back to the Future','Spaceballs','Jaws','Apollo 13', 'Independence Day', 'Serenity','Fifth Element', 'Hidden Figures','Fantastic Beasts','The Incredibles', 'How To Train Your Dragon','The Secret Life of Pets', 'Frozen','Moana', 'The Polar Express', 'Coco', 'Night at the Museum','Star Wars VIII: The Last Jedi', 'Rolling Stones at the Max'],
                   'OMNI_OTHER': ['Omni Admission']
                 }
