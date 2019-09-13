@@ -8,7 +8,6 @@ import matplotlib as mpl
 from matplotlib import pyplot as plt
 import time
 import glob
-#from numba import jit
 
 def set_plot_size(w,h, *args, **kwargs):
     
@@ -96,7 +95,7 @@ def add_venue(df):
     
     venues = df['Venue'].values
     
-    noble_list = ['Texas Sky Tonight', 'Our Solar System','Planetarium Experience', 'This Is Your Captain Speaking','Fragile Planet', 'Design A Mission', 'One World, One Sky','Take Me To The Stars', 'Noble Admission','Black Holes', 'Stars Of The Pharaohs', 'Sun, Earth, Moon: Beginnings','Sun, Earth, Moon: Explorations','Sun, Earth, Moon: Connections','Sun, Earth, Moon: Advanced', 'Imagine the Moon']
+    noble_list = ['Texas Sky Tonight', 'Our Solar System','Planetarium Experience', 'This Is Your Captain Speaking','Fragile Planet', 'Design A Mission', 'One World, One Sky','Take Me To The Stars', 'Noble Admission','Black Holes', 'Stars Of The Pharaohs', 'Sun, Earth, Moon: Beginnings','Sun, Earth, Moon: Explorations','Sun, Earth, Moon: Connections','Sun, Earth, Moon: Advanced', 'Imagine the Moon', 'Astro Chats', 'Sun, Earth, Moon']
     noble = df.loc[df['Description'].isin(noble_list)]
     venues[noble.index] = 'Noble'
     
@@ -235,8 +234,14 @@ def fix_names(df):
                 "One World, One Sky: Big Bird's", "One World One Sky: Big Bird's")
     df = df.replace(to_replace=nob_owos, value="One World, One Sky")
         
+    nob_SEM = ('Sun, Earth, Moon',' Sun, Earth, Moon')
+    df = df.replace(to_replace=nob_SEM, value="Sun, Earth, Moon")
+    
     nob_SEM_adv = ('Sun, Earth, Moon: Advance', 'Sun, Earth, Moon: Adv', 'Sun, Earth, and Moon: Ad', 'Sun, Earth, Moon: Ad Grp')
     df = df.replace(to_replace=nob_SEM_adv, value="Sun, Earth, Moon: Advanced")
+    
+    nob_astro_chats = (' Chats')
+    df = df.replace(to_replace=nob_astro_chats, value="Astro Chats")
     
     nob_SEM_con = ('Earth, Sun, Moon: C', 'Earth, Sun, Moon: Connect')
     df = df.replace(to_replace=nob_SEM_con, value="Sun, Earth, Moon: Connections")
@@ -305,7 +310,7 @@ def fix_names(df):
     df = df.replace(to_replace=reel_adv, value="Reel Adventures")
     
     celeb_lecture = ('H. P. Newquist Lecture', 'David Zinn Celebrity Lecture', 'Adrian Garza',
-                     'Matt Tedder',
+                     'Matt Tedder', 'Celebrity Lecture Series',
                      'Brantley Hargrove Lecture', 'Paul Sutter Lecture', 'Michael Webber Lecture')
     df = df.replace(to_replace=celeb_lecture, value="Lecture Series")
     
@@ -319,7 +324,7 @@ def fix_names(df):
     polar_pj = ('Polar Express Pajama Party')
     df = df.replace(to_replace=polar_pj, value="Polar Express PJ Party")
     
-    science_on_tap = ('Science on Tap: Sweet & Savory', 'SoT: Grown Up Summer Camp','SoT: Moonwalk')
+    science_on_tap = ('Science on Tap: Sweet & Savory', 'SoT: Grown Up Summer Camp','SoT: Moonwalk', "SoT: High Tech")
     df = df.replace(to_replace=science_on_tap, value="Science on Tap")
     
     msb = ('Mad Scientist Ball 2019')
@@ -1278,25 +1283,62 @@ def create_presale_model(data, curve_list, new_err=False):
     
     # New error estimation    
     if new_err:
-        err = np.zeros((len(fixed_curves),len(max_index)))
-        err_low = np.zeros((len(fixed_curves),len(max_index))) # Holds errors where the prediction was too low
-        err_high = np.zeros((len(fixed_curves),len(max_index))) # Holds errors where the prediction was too high
+        # Errors by fraction
+        err_frac = np.zeros((len(fixed_curves),len(max_index)))       
+        err_frac_low = np.zeros((len(fixed_curves),len(max_index))) # Holds errors where the prediction was too low
+        err_frac_high = np.zeros((len(fixed_curves),len(max_index))) # Holds errors where the prediction was too high
+        
+        # Errors by absolute magnitude
+        err_mag = np.zeros((len(fixed_curves),len(max_index)))       
+        err_mag_low = np.zeros((len(fixed_curves),len(max_index))) # Holds errors where the prediction was too low
+        err_mag_high = np.zeros((len(fixed_curves),len(max_index))) # Holds errors where the prediction was too high
+        
         for i in range(len(fixed_curves)):
             for j in np.arange(1,len(max_index)):
-                err = (_do_fit(collapsed, (fixed_curves[i]).iloc[:-j], project=True) - (fixed_curves[i])['Total tickets']).values[-1]/(fixed_curves[i])['Total tickets'].values[-1]
+                err_mag = (_do_fit(collapsed, (fixed_curves[i]).iloc[:-j], project=True) - (fixed_curves[i])['Total tickets']).values[-1]               
+                err_frac = err_mag/(fixed_curves[i])['Total tickets'].values[-1]
                 
-                if err >=0:
-                    err_high[i,j-1] = err
-                    err_low[i,j-1] = np.nan
+                if err_frac >=0:
+                    err_frac_high[i,j-1] = err_frac
+                    err_frac_low[i,j-1] = np.nan
+                    err_mag_high[i,j-1] = err_mag
+                    err_mag_low[i,j-1] = np.nan
+                    
                 else:
-                    err_low[i,j-1] = abs(err)
-                    err_high[i,j-1] = np.nan
+                    err_frac_low[i,j-1] = abs(err_frac)
+                    err_frac_high[i,j-1] = np.nan
+                    err_mag_low[i,j-1] = abs(err_mag)
+                    err_mag_high[i,j-1] = np.nan
 
-        high_80 = np.nanpercentile(err_high, 80, axis = 0)
-        low_80 = np.nanpercentile(err_low, 80, axis=0)
+        frac_high_80 = np.nanpercentile(err_frac_high, 80, axis = 0)
+        frac_low_80 = np.nanpercentile(err_frac_low, 80, axis=0)
+        mag_high_80 = np.nanpercentile(err_mag_high, 80, axis = 0)
+        mag_low_80 = np.nanpercentile(err_mag_low, 80, axis=0)
         
-        collapsed['Error high'] = np.flip(high_80,axis=0)
-        collapsed['Error low'] = np.flip(low_80,axis=0)
+        collapsed['Error high'] = np.flip(frac_high_80,axis=0)
+        collapsed['Error low'] = np.flip(frac_low_80,axis=0)
+        collapsed['Error high mag'] = np.flip(mag_high_80,axis=0)
+        collapsed['Error low mag'] = np.flip(mag_low_80,axis=0)
+        # err = np.zeros((len(fixed_curves),len(max_index)))
+        # err_low = np.zeros((len(fixed_curves),len(max_index))) # Holds errors where the prediction was too low
+        # err_high = np.zeros((len(fixed_curves),len(max_index))) # Holds errors where the prediction was too high
+        # for i in range(len(fixed_curves)):
+            # for j in np.arange(1,len(max_index)):
+                # err = (_do_fit(collapsed, (fixed_curves[i]).iloc[:-j], project=True) - (fixed_curves[i])['Total tickets']).values[-1]/(fixed_curves[i])['Total tickets'].values[-1]
+                
+                # if err >=0:
+                    # err_high[i,j-1] = err
+                    # err_low[i,j-1] = np.nan
+                # else:
+                    # err_low[i,j-1] = abs(err)
+                    # err_high[i,j-1] = np.nan
+
+        # high_80 = np.nanpercentile(err_high, 80, axis = 0)
+        # low_80 = np.nanpercentile(err_low, 80, axis=0)
+        
+        # collapsed['Error high'] = np.flip(high_80,axis=0)
+        # collapsed['Error low'] = np.flip(low_80,axis=0)
+        
     collapsed = collapsed.drop(['Tickets', 'Total tickets'], axis=1)
     return(collapsed)
 
@@ -1344,8 +1386,16 @@ def project_sales_with_fit(data, model, name, date,
         fit = curve_fit(_f, combo['Frac expected'].values, combo['Total tickets'].values, sigma=weights, absolute_sigma=True)
     
         proj = fit[0]*model['Frac sold'].iloc[-1]
-        low = proj - proj*combo['Error low'].iloc[-1]
-        high = proj + proj*combo['Error high'].iloc[-1]
+        #low = proj - proj*combo['Error low'].iloc[-1]
+        #high = proj + proj*combo['Error high'].iloc[-1]
+        
+        frac_low = proj - proj*combo['Error low'].iloc[-1]
+        frac_high = proj + proj*combo['Error high'].iloc[-1]
+        mag_low = proj - combo['Error low mag'].iloc[-1]
+        mag_high = proj + combo['Error high mag'].iloc[-1]
+        
+        low = (frac_low+mag_low)/2
+        high = (frac_high+mag_high)/2
     
     if (max_tickets > 0):
         if proj > max_tickets:
@@ -1949,7 +1999,7 @@ def create_projection_chart(data, model, name, perf_date,
     
     # This forces the sales path to connect with the number of current sales. If fit=False,
     # this just sets the same value over again.
-    if simple:
+    if simple and (len(path_proj) > 0):
         path_proj[0] = (perf_curve.iloc[-1])['Total tickets']
     
     # Set larger font size if plotting for dashboard
@@ -1978,8 +2028,9 @@ def create_projection_chart(data, model, name, perf_date,
     plt.annotate(str(int(low)),xy=(0, low), xytext=(8,-8), textcoords='offset points', fontsize=ticks_fontsize)
     if np.isfinite(high):
         plt.annotate(str(int(high)),xy=(0, high), xytext=(8,-8), textcoords='offset points', fontsize=ticks_fontsize)
-
-    plt.ylim((0,1.05*max_tickets))
+    
+    if max_tickets > 0:
+        plt.ylim((0,1.05*max_tickets))
     plt.xlabel('Days until event', fontsize=label_fontsize)
     plt.ylabel('Projected attendence', fontsize=label_fontsize)
     plt.xticks(fontsize=ticks_fontsize)
@@ -1989,7 +2040,7 @@ def create_projection_chart(data, model, name, perf_date,
     else:
         plt.title(title, fontsize=title_fontsize)
     
-    legend = plt.legend(frameon=1, fontsize=ticks_fontsize)
+    legend = plt.legend(frameon=1, fontsize=ticks_fontsize, loc='upper left')
     frame = legend.get_frame()
     frame.set_color('white')
     frame.set_facecolor('white')
@@ -2006,7 +2057,6 @@ def create_projection_chart(data, model, name, perf_date,
     if len(filename) > 0:
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         
-    #plt.show()
     return(plt.gcf())
     
 def general_projection(data, type, date_range, adjust=True):
