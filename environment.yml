@@ -13,3 +13,4 @@ dependencies:
     - scipy
     - glob3
     - zipfile36
+    - numba
