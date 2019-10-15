@@ -8,6 +8,7 @@ import matplotlib as mpl
 from matplotlib import pyplot as plt
 import time
 import glob
+import numba
 
 def set_plot_size(w,h, *args, **kwargs):
     
@@ -27,7 +28,8 @@ def load_data(path):
     
     # Read and process the data
 
-    files = glob.glob(path + '/*.csv')
+    files = glob.glob(path + '/*.CSV')
+
     raw_dfs = list()
     if len(files) > 0:
         for file in files:
@@ -114,7 +116,7 @@ def add_venue(df):
                  'Back to the Future', 'Spaceballs', 'Bugs!']
     omni = df.loc[df['Description'].isin(omni_list)]
     venues[omni.index] = 'Omni'
-    studios_list = ['Science on Tap', "FAMapalooza", 'Birthday Party',
+    studios_list = ['Science on Tap', "FAMapalooza", 'Birthday Party', 'Ick or Treat',
                     'Reel Adventures','Polar Express PJ Party']
     studios = df.loc[df['Description'].isin(studios_list)]
     venues[studios.index] = 'Studios'
@@ -128,12 +130,10 @@ def _compute_audience(ser, all_price):
     # Helper function called by add_audience() to apply a School/Public label to a dataframe.
     # Assumes ttCode has already been added to ser
     # all_price is a pricetyple DataFrame covering ser and any other rows being computed.
-
-    df = pd.DataFrame(ser).transpose()
     
-    desc = df['Description'].values[0]
-    code = df['ttCode'].values
-    extracted = _slice_pricing_data(all_price, code)
+    
+    desc = ser['Description']
+    extracted = _slice_pricing_data(all_price, [ser['ttCode']])
     if  (desc == 'General Admission') or (desc == 'Parking'):
         return(['Public'])
     frac = get_school_data(extracted, silent=True)['School fraction']
@@ -161,27 +161,6 @@ def add_audience(data):
     pricing_data = get_pricing_data(df, silent=True, return_ttCode=True)
     df['Audience'] = df.apply(_compute_audience,axis=1, result_type='expand', args=[pricing_data])
     df = df.drop('ttCode', axis=1)
-    
-    # # Add Audience column
-    # df['Audience'] = 'Public'
-    # values = df['Audience'].values
-    # # no_school days are weekdays when we're on a public schedule
-    # no_school = pd.to_datetime(['2018-03-12', '2018-03-13', '2018-03-14', '2018-03-15', '2018-03-16',
-                 # '2018-01-02', '2018-01-03', '2018-01-04', '2018-01-05', '2018-01-15',
-                 # '2018-05-28', '2018-09-03', '2018-09-10', '2018-01-01', '2018-10-08', '2018-11-23', '2018-11-19', '2018-11-20', '2018-11-21', '2018-11-23', '2019-03-11', '2019-03-12', '2019-03-13', '2019-03-14', '2019-03-15'])
-
-    # # This is all the weekdays within the general range of the school year
-    # school_dates = pd.bdate_range('2018-01-02', '2018-05-31').union(pd.bdate_range('2018-09-04', '2018-12-21')).union(pd.bdate_range('2019-02-12', '2019-05-31'))
-    
-    # # This is all those weekdays which also have shows before 1:30 PM
-    # match = df['Perf date'].dt.date.isin(pd.Series(school_dates).dt.date) & (df['Perf date'].dt.time < pd.to_datetime('13:30:00').time())
-    # values[match] = 'School'
-    
-    # # Now set the days in no_school back to Public
-    # match2 = df['Perf date'].dt.date.isin(pd.Series(no_school).dt.date)
-    # values[match2] = 'Public'
-                 
-    # df['Audience'] = values
     
     return(df)
     
@@ -350,14 +329,15 @@ def add_attach(to_add, all_data):
         # Pre-compute the attendance for each day in question
         #t1 = time.time()
         for str_date in str_dates.unique():
-            admis = get_performance(all_data,'General Admission', str_date)['Tickets'].sum()
+            admis = get_performance(all_data,'General Admission', str_date)['Tickets'].to_numpy().sum()
             admis_dict[str_date] = admis
         #print(time.time() - t1)
         
         attach = list()
+        str_dates = str_dates.values
         for i in range(len(to_add)):    
             row = to_add.iloc[i]
-            str_date = str_dates.values[i]
+            str_date = str_dates[i]
             admis = admis_dict[str_date]
             try:
                 attach.append(np.round((row['Tickets'] / admis), 3))
@@ -376,8 +356,9 @@ def add_weekday(df):
 
     # Function that adds a column to df that gives the name of the day_index
     # of the week for that show
+
     if len(df) > 0:
-        df['Day of week'] = df['Perf date'].dt.strftime('%A')
+       df['Day of week'] = df['Perf date'].dt.strftime('%A')
     
     return(df)
 
@@ -412,12 +393,12 @@ def get_yoy(data, **kwargs):
     result = pd.DataFrame()
     result['Period'] = [cur_args['date'][0].strftime('%Y-%m-%d')+' - '+cur_args['date'][1].strftime('%Y-%m-%d'), past_args['date'][0].strftime('%Y-%m-%d')+' - '+past_args['date'][1].strftime('%Y-%m-%d'), 'Year-over-year']
     
-    cur_tick = cur_result['Tickets'].sum()
-    past_tick = past_result['Tickets'].sum()
+    cur_tick = cur_result['Tickets'].to_numpy().sum()
+    past_tick = past_result['Tickets'].to_numpy().sum()
     result['Tickets'] = [cur_tick, past_tick, -1*(past_tick-cur_tick)/past_tick]
     
-    cur_rev = cur_result['Revenue'].sum()
-    past_rev = past_result['Revenue'].sum()
+    cur_rev = cur_result['Revenue'].to_numpy().sum()
+    past_rev = past_result['Revenue'].to_numpy().sum()
     result['Revenue'] = [cur_rev, past_rev, -1*(past_rev-cur_rev)/past_rev]
     
     return(result)
@@ -575,8 +556,8 @@ def get_historical(data, n_yr, **kwargs):
         
         # Add the results from this year to the lists
         period_list.append(past_args['date'][0].strftime('%Y-%m-%d')+' - '+past_args['date'][1].strftime('%Y-%m-%d'))
-        tickets_list.append(past_result['Tickets'].sum())
-        revenue_list.append(past_result['Revenue'].sum())
+        tickets_list.append(past_result['Tickets'].to_numpy().sum())
+        revenue_list.append(past_result['Revenue'].to_numpy().sum())
         
     results = pd.DataFrame()
     results['Period'] = period_list
@@ -657,10 +638,10 @@ def get_age_data(data, get='', debug=False):
             return(child_data)
         else:    
             results = {}
-            results['Adult tickets'] = adult_data.sum()['Tickets']
-            results['Adult revenue'] = adult_data.sum()['Revenue']
-            results['Child tickets'] = child_data.sum()['Tickets']
-            results['Child revenue'] = child_data.sum()['Revenue']
+            results['Adult tickets'] = adult_data['Tickets'].to_numpy().sum()
+            results['Adult revenue'] = adult_data['Revenue'].to_numpy().sum()
+            results['Child tickets'] = child_data['Tickets'].to_numpy().sum()
+            results['Child revenue'] = child_data['Revenue'].to_numpy().sum()
             results['Adult fraction'] = np.round(results['Adult tickets']/(results['Adult tickets']+results['Child tickets']),3)
             return(results)
         
@@ -705,10 +686,10 @@ def get_group_data(data, get='', debug=False):
             return(regular_data)
         else:       
             results = {}
-            results['Group tickets'] = group_data.sum()['Tickets']
-            results['Group revenue'] = group_data.sum()['Revenue']
-            results['Regular tickets'] = regular_data.sum()['Tickets']
-            results['Regular revenue'] = regular_data.sum()['Revenue']
+            results['Group tickets'] = group_data['Tickets'].to_numpy().sum()
+            results['Group revenue'] = group_data['Revenue'].to_numpy().sum()
+            results['Regular tickets'] = regular_data['Tickets'].to_numpy().sum()
+            results['Regular revenue'] = regular_data['Revenue'].to_numpy().sum()
             results['Group fraction'] = np.round(results['Group tickets']/(results['Group tickets']+results['Regular tickets']),3)
             return(results)
         
@@ -716,20 +697,18 @@ def get_group_data(data, get='', debug=False):
         df = get_pricing_data(df, debug=debug)
         return(get_group_data(df, get=get))
         
-def get_school_data(data, get='', debug=False, silent=False):
+def get_school_data(df, get='', debug=False, silent=False):
 
     # Function to return data related to school groups.
     # Set get='school' to return a DataFrame containing all the data for school groups
     # Set get='regular' to return a DataFrame containing all the data that isn't schools
     # set get='' to return a summary DataFrame
-    # 'School fraction' is the fraction of *tickets* sold to schools.
-           
-    df = data.copy()
+    # 'School fraction' is the fraction of *tickets* sold to schools.  
            
     # Check if our dataframe includes price types
     if 'Price type' in df:
-        
-        school_types = ['School Combo Adult','School Combo Free Adult','School Free Adult','FWISD Free Adult','FWISD Adult','FMN Adults','FMN Chaperones','School Adult','School Combo Student',  'School Student','FWISD Student','FMN Students','School Free Student']
+                
+        school_types = ['School Combo Adult','School Combo Free Adult','School Free Adult','FWISD Free Adult','FWISD Adult','FMN Adults','FMN Chaperones','School Adult','School Combo Student',  'School Student','FWISD Student','FMN Students','School Free Student', 'School Exhibits Omni Adult']
         
         regular_types = ['Group Junior','Group C2 Junior','Group C3 Junior','Birthday Guest', 'Birthday Paid Guest','Group C2 Adult','Group C3 Adult','Group Free Adult','Group C2 Free Adult','Group C3 Free Adult','Group Adult','Combo 2 Junior', 'Junior','Member Junior', 'Wonder Free Junior',  'Combo 3 Junior','ASTC Junior',  'Perot Junior','Special Event Member Junior','Wonder Discount Junior','Stock Show Junior','Stock Show Member Junior', 'Stock Show Member Under 6','Stock Show Under 6','Add-on Planetarium Jr', 'Junior Upcharge','Staff Junior','Adult', 'Combo 2 Adult', 'Member Adult','Wonder Free Adult','Combo 3 Adult','Service','ASTC Adult','Perot Adult','Staff Adult','Special Event Member Adult','Adult Upcharge','Wonder Discount Adult','Stock Show Adult', 'Stock Show Member Adult', 'Add-on Planetarium Adult','$5 Add-on',  'Comp', 'Omni Staff Guest', 'Member Parking', 'Parking', 'Museum Parking Comp', 'Planetarium Member','DMR Discover Member', 'DMR Wonder Member', 'Museum Parking - CR/NCM','Special Event','2 Day Pass', '3 Day Pass']
         
@@ -754,16 +733,16 @@ def get_school_data(data, get='', debug=False, silent=False):
             return(regular_data)
         else:       
             results = {}
-            results['School tickets'] = school_data.sum()['Tickets']
-            results['School revenue'] = school_data.sum()['Revenue']
-            results['Regular tickets'] = regular_data.sum()['Tickets']
-            results['Regular revenue'] = regular_data.sum()['Revenue']
+            results['School tickets'] = school_data['Tickets'].to_numpy().sum()
+            results['School revenue'] = school_data['Revenue'].to_numpy().sum()
+            results['Regular tickets'] = regular_data['Tickets'].to_numpy().sum()
+            results['Regular revenue'] = regular_data['Revenue'].to_numpy().sum()
             results['School fraction'] = np.round(results['School tickets']/(results['School tickets']+results['Regular tickets']),3)
             return(results)
         
     else: # We need to match (description, perf date) tuples to the price type data
-        df = get_pricing_data(df, debug=debug, silent=silent)
-        return(get_school_data(df, get=get))
+        df2 = get_pricing_data(df, debug=debug, silent=silent)
+        return(get_school_data(df2, get=get))
         
 def get_member_data(data, get='', debug=False):
     
@@ -795,10 +774,10 @@ def get_member_data(data, get='', debug=False):
             return(guest_data)
         else:
             result = {}
-            result['Member tickets'] = member_data.sum()['Tickets']
-            result['Member revenue'] = member_data.sum()['Revenue']
-            result['Guest tickets'] = guest_data.sum()['Tickets']
-            result['Guest revenue'] = guest_data.sum()['Revenue']
+            result['Member tickets'] = member_data['Tickets'].to_numpy().sum()
+            result['Member revenue'] = member_data['Revenue'].to_numpy().sum()
+            result['Guest tickets'] = guest_data['Tickets'].to_numpy().sum()
+            result['Guest revenue'] = guest_data['Revenue'].to_numpy().sum()
             result['Member fraction'] = np.round(result['Member tickets']/(result['Member tickets'] + result['Guest tickets']),3)
             return(result)      
     
@@ -817,11 +796,11 @@ def load_pricing_data():
         if not 'ttCode' in tt_pricetype:
             tt_pricetype = add_unique_code(tt_pricetype)
     
-def _slice_pricing_data(data, to_extract):
+def _slice_pricing_data(df, to_extract):
 
-    # Function that takes a DataFrame of pricing data and returns values matching the ttCodes given by to_extract. to_extract must be a list of ttCodes.
+    # Function that takes a DataFrame of pricing data and returns values matching the ttCodes given by to_extract. to_extract must be a list of ttCodes. Using optimized numpy code for the best performance
     
-    return(data[data['ttCode'].isin(to_extract)])
+    return(df[np.in1d(df['ttCode'],to_extract)])
     
 def get_pricing_data(data, debug=False, retain_zero=False, return_ttCode=True, silent=False):
 
@@ -865,7 +844,7 @@ def add_unique_code(data):
     
     if len(data) > 0:
         df = data.copy()
-        df['ttCode'] = df['Description'] + np.round((df['Perf date'] - pd.to_datetime('2017-01-01')).dt.total_seconds()).astype(str)
+        df['ttCode'] = df['Description'] + (df['Perf date'] - pd.to_datetime('2017-01-01')).dt.total_seconds().astype(str)
         
         return df
     else:
@@ -966,10 +945,11 @@ def _expand_omni_alias(alias):
         
 def search(data, name='', date='', time='', venue='', audience='',
             tickets='', revenue='', day_of_week=-1, weekday=False,
-            weekend=False, group='', attach=False, **kwargs):
-
+            weekend=False, group='', attach=False, fast=False, **kwargs):
+    
     # This function returns a dateframe that filters the overall
     # dataset based on the specified parameters.
+    # Set fast=True to bypass adding a day of week
     
     all_data = data.copy()
     
@@ -1013,7 +993,7 @@ def search(data, name='', date='', time='', venue='', audience='',
         data = data[data['Perf date'].dt.weekday < 5]
     elif weekend:
         data = data[data['Perf date'].dt.weekday > 4]
-
+    
     # Find the unique columns so we can get lost columns back
     unique = data.drop_duplicates(subset=['Description', 'Perf date']).sort_values(['Description', 'Perf date'])
     # Need to group by name and date before checking against summed values
@@ -1021,8 +1001,7 @@ def search(data, name='', date='', time='', venue='', audience='',
     # String columns are lost, so let's re-add them.
     data['Venue'] = unique['Venue'].values
     data['Audience'] = unique['Audience'].values
-    data = add_weekday(data)
-            
+
     if len(time) > 0:
     
         if time[0] == '>':
@@ -1072,6 +1051,10 @@ def search(data, name='', date='', time='', venue='', audience='',
         if len(audience) > 0:
             data['Audience'] = audience
     
+    # Add the English day of week (VERY SLOW)
+    if not fast:
+        data = add_weekday(data)
+    
     # This adds a column that is Tickets/General Admission
     if ((attach == True) or (len(data) < 25)) and (group == ''):
         data = add_attach(data, all_data)
@@ -1097,29 +1080,6 @@ def get_accounting_ledger(data, to_match):
     combo = combo.groupby('Order date').sum().reset_index().drop('Tickets', axis=1)
     #return(combo.sort_values('Order date'))
     return(combo)    
-    
-# def get_show(data, name, summarize=False, all=False):
-    
-    # # Function to return all instances of a given show across  
-    # # order and perf dates. Set summarize=True to group by perf
-    # # date. By default, only events in the future are returned.
-    # # Set all=True to also retrieve past events.
-    
-    # if all:
-        # result = data[data['Description'] == name]   
-    # else:
-        # result = data[(data['Description'] == name) & (data['Perf date'] > datetime.datetime.now())]      
-    # if summarize:
-        # temp = result.groupby('Perf date').sum().reset_index()
-        # temp['Description'] = name
-        # temp = add_venue(temp)
-        # temp = add_audience(temp)
-        # result = temp[['Description','Perf date', 'Tickets', 'Revenue', 'Venue',
-                        # 'Audience']]
-        
-    # result = result.sort_values('Perf date')
-        
-    # return(result)
 
 def get_performance(data, name, perf_date, fast=False, summarize=False):
     
@@ -1212,7 +1172,7 @@ def get_sales_curve(data,
         extension['Revenue'] = 0
         orders = orders.append(extension)
     
-    cumsum = orders.Tickets.cumsum()
+    cumsum = orders.Tickets.to_numpy().cumsum()
     if max_tickets == 0:
         frac_sum = cumsum/max(cumsum)
     else:
@@ -1221,10 +1181,10 @@ def get_sales_curve(data,
     diff = orders.reset_index()['Order date'].dt.date.sub(perf_date.date())/np.timedelta64(1, 'D')
 
     result = pd.DataFrame()
-    result['Days before'] = diff.values
-    result['Tickets'] = orders.Tickets.values
-    result['Total tickets'] = cumsum.values
-    result['Frac sold'] = frac_sum.values
+    result['Days before'] = diff.to_numpy()
+    result['Tickets'] = orders.Tickets.to_numpy()
+    result['Total tickets'] = cumsum
+    result['Frac sold'] = frac_sum
     
     if end_on_event:
         result = result[result['Days before'] <= 0]
@@ -1292,11 +1252,14 @@ def create_presale_model(data, curve_list, new_err=False):
         err_mag = np.zeros((len(fixed_curves),len(max_index)))       
         err_mag_low = np.zeros((len(fixed_curves),len(max_index))) # Holds errors where the prediction was too low
         err_mag_high = np.zeros((len(fixed_curves),len(max_index))) # Holds errors where the prediction was too high
-        
+
         for i in range(len(fixed_curves)):
             for j in np.arange(1,len(max_index)):
-                err_mag = (_do_fit(collapsed, (fixed_curves[i]).iloc[:-j], project=True) - (fixed_curves[i])['Total tickets']).values[-1]               
+                proj = _do_fit(collapsed, (fixed_curves[i]).iloc[:-j], project=True)
+                err_mag = (proj - (fixed_curves[i])['Total tickets']).values[-1]               
                 err_frac = err_mag/(fixed_curves[i])['Total tickets'].values[-1]
+                err_frac2 = err_mag/abs(proj - (fixed_curves[i])['Total tickets'].values[j])
+                
                 
                 if err_frac >=0:
                     err_frac_high[i,j-1] = err_frac
@@ -1351,7 +1314,7 @@ def project_sales_with_fit(data, model, name, date,
     # If day != 1000, the projection will be based only on days up to that day (used when making the projection graph).
     
     if isinstance(model, str):
-        model = data.tt.get_model(model)#data.tt._preset_models(model, new_err=True)
+        model = data.tt.get_model(model)
     else: 
         pass # Hopefully we have been passed a model DataFrame
     
@@ -1386,9 +1349,9 @@ def project_sales_with_fit(data, model, name, date,
         fit = curve_fit(_f, combo['Frac expected'].values, combo['Total tickets'].values, sigma=weights, absolute_sigma=True)
     
         proj = fit[0]*model['Frac sold'].iloc[-1]
-        #low = proj - proj*combo['Error low'].iloc[-1]
-        #high = proj + proj*combo['Error high'].iloc[-1]
         
+        #frac_low = proj - (proj-combo['Total tickets'].values[-1])*combo['Error low'].iloc[-1]
+        #frac_high = proj + (proj-combo['Total tickets'].values[-1])*combo['Error high'].iloc[-1]
         frac_low = proj - proj*combo['Error low'].iloc[-1]
         frac_high = proj + proj*combo['Error high'].iloc[-1]
         mag_low = proj - combo['Error low mag'].iloc[-1]
@@ -1479,7 +1442,8 @@ def _do_fit(model, sales_path, project=False, *kwargs):
         return(fit)
     else:
         return((fit[0]*model['Frac sold'].iloc[-1])[0])
-    
+
+@numba.jit
 def _f(model, scalar):
     
     # This stub function is used in curve fitting as part of project_sales_with_fit
@@ -1564,6 +1528,7 @@ def project_sales(data, model, input1, input2, max_tickets=0, verbose=True, new_
     
 def project_sales_path(data, model, input1, input2, 
                        max_tickets=0, full=False):
+                       
     # Function to project what the sales path should look like
     # going forward. This takes into account the possibility
     # of a sellout. 
@@ -1619,12 +1584,16 @@ def _preset_models(data, name, list=False, new_err=False):
                            ('Science on Tap', '2019-06-21'),
                            ('Science on Tap', '2019-07-19'),
                            ('Science on Tap', '2019-08-16'),
+                           ('Science on Tap', '2019-10-11'),
                            ('Give Back Game Night', '2018-08-18'),
                            ('Reel Adventures', '2018-05-12'),
                            ('Reel Adventures', '2018-05-18'),
                            ('Reel Adventures', '2019-04-26'),
                            ('Reel Adventures', '2019-05-10'),
                            ('Reel Adventures', '2019-05-17'),
+                           ('Reel Adventures', '2019-09-20'),
+                           ('Reel Adventures', '2019-09-27'),
+                           ('Reel Adventures', '2019-09-28'),
                            ('FAMapalooza', '2018-06-22'),
                            ('FAMapalooza', '2018-07-14'),
                            ('FAMapalooza', '2018-08-11')],
@@ -1634,6 +1603,9 @@ def _preset_models(data, name, list=False, new_err=False):
                            ('Reel Adventures', '2019-04-26'),
                            ('Reel Adventures', '2019-05-10'),
                            ('Reel Adventures', '2019-05-17'),
+                           ('Reel Adventures', '2019-09-20'),
+                           ('Reel Adventures', '2019-09-27'),
+                           ('Reel Adventures', '2019-09-28'),
                            ('FAMapalooza', '2018-06-22'),
                            ('FAMapalooza', '2018-07-14'),
                            ('FAMapalooza', '2018-08-11')],
@@ -1645,9 +1617,12 @@ def _preset_models(data, name, list=False, new_err=False):
                            ('Science on Tap', '2019-06-21'),
                            ('Science on Tap', '2019-07-19'),
                            ('Science on Tap', '2019-08-16'),
+                           ('Science on Tap', '2019-10-11'),
                            ('Give Back Game Night', '2018-08-18')],
                            
-              'lecture':  [('Lecture Series', '2019-04-15'),
+              'lecture':  [
+                           ('Lecture Series', '2019-09-16'),
+                           ('Lecture Series', '2019-04-15'),
                            ('Lecture Series', '2019-05-13'),
                            ('Lecture Series', '2018-05-10'),
                            ('Lecture Series', '2018-03-22'),
@@ -1893,6 +1868,55 @@ def create_sales_chart(*args,
     plt.close()
     return(fig)
     
+def test_model_calibration(data, model, curve_list, from_day=999):
+
+    # Function to check how well calibrated a given model is. I.e.,
+    # if we say 80% of events should be below the top error bar, is
+    # that true? This function requires use of the "fit" projection
+    # method.
+    # Supply curve list = [('name', 'date', max_tickets)] to specify 
+    # which events to use in the test.
+    # Set from_day= to restrict the report to days closer than (and
+    # including) the given day.
+    
+    # These will hold the statistics we want
+    predicts = 0
+    overshoots = 0
+    undershoots = 0
+    error_list = list()
+    
+    from_day = -1*abs(from_day) # Make sure this is negative.
+    
+    for event in curve_list:      
+        perf_curve = get_sales_curve(data, event[0], event[1], max_tickets=event[2], pad=True, end_on_event=True)
+        final = perf_curve['Total tickets'].values[-1]
+        
+        for i in range(len(perf_curve)):
+            day = (perf_curve.iloc[i])['Days before']
+            if day > from_day: # These are negatives
+                predicts += 1
+                proj, low, high = project_sales_with_fit(data, model, 
+                                                                event[0], 
+                                                                event[1],
+                                                                day=day,
+                                                                max_tickets=event[2],
+                                                                verbose=False)
+            
+                if final > high:
+                    overshoots += 1
+                elif final < low:
+                    undershoots += 1
+                
+                error_list.append(proj - final)
+        
+    print('Callibration report:')
+    print('Fraction overshot:  ', np.round(overshoots/predicts, 2))
+    print('Fraction undersshot:', np.round(undershoots/predicts, 2))
+    print('Mean error:         ', np.round(np.mean(error_list)))
+    print('Mean absolute error:', np.round(np.mean(abs(np.asarray(error_list)))))
+            
+        
+
 def create_projection_chart(data, model, name, perf_date,
                             dashboard=False,
                             filename='',
@@ -2185,9 +2209,6 @@ class ttAccessor(object):
     def search(self, **kwargs):
         return(search(self._obj, **kwargs))
             
-    # def get_show(self, *args, **kwargs):
-        # return(get_show(self._obj, *args, **kwargs))
-    
     def get_performance(self, *args, **kwargs):
         return(get_performance(self._obj, *args, **kwargs))
     
