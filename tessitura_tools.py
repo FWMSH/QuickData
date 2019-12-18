@@ -296,8 +296,14 @@ def fix_names(df):
 
     celeb_lecture = ('H. P. Newquist Lecture', 'David Zinn Celebrity Lecture', 'Adrian Garza',
                      'Matt Tedder', 'Celebrity Lecture Series',
-                     'Brantley Hargrove Lecture', 'Paul Sutter Lecture', 'Michael Webber Lecture', 'Evidence of the First Texans')
+                     'Brantley Hargrove Lecture', 'Paul Sutter Lecture', 'Michael Webber Lecture', 'Evidence of the First Texans', 'Camp Bowie: Military History')
     df = df.replace(to_replace=celeb_lecture, value="Lecture Series")
+
+    omni_jerusalem = ('Jerusalem Group')
+    df = df.replace(to_replace=omni_jerusalem, value="Jerusalem")
+
+    omni_apollo11 = ('Apollo 11 Grp')
+    df = df.replace(to_replace=omni_apollo11, value="Apollo 11")
 
     live_at_the_museum = ('The Vince Lujan Project','Buffalo Ruckus','Danni and Kris', 'Center 313','Light Crust Doughboys', 'Douglas, Padgett, Stice & Li')
     df = df.replace(to_replace=live_at_the_museum, value="Live at the Museum")
@@ -479,6 +485,126 @@ def create_yoy_chart(data, **kwargs):
         plt.savefig(kwargs['filename'], dpi=300)
 
     return(plt.gcf())
+
+def _performance_grid(data, shows, relative=True, type='Tickets'):
+
+    # Function to return 24x7 ndarray that gives the perforamce of all
+    # the shows contained in the DataFrame shows. If relative=True,
+    # the performance is scaled [0:1], otherwise it is the median tickets
+    # sold for a show in that time slot.
+    # Type must be a column in the DataFrame, typically "Tickets" or "Revenue"
+
+    temp = shows.copy()
+
+    temp['Hour'] = temp['Perf date'].dt.round('H').dt.hour
+    temp['Weekday'] = temp['Perf date'].dt.weekday
+
+    grouped = temp.groupby(['Weekday', 'Hour']).median()
+
+    # Build the ndarray
+    arrays = [np.repeat(np.arange(7), 24), 7*list(range(24))]
+    index = pd.MultiIndex.from_arrays(arrays, names=('Weekday', 'Hour'))
+
+    arr = grouped[type].reindex(index).unstack().transpose().to_numpy()
+
+    if relative:
+        arr /= np.nanmax(arr)
+
+    return(arr)
+
+def create_performance_grid_chart(data, shows, relative=True,
+                                    type='Tickets', title='',
+                                    filename='', dynamic_range=True,
+                                    silent=False, debug=False):
+
+    # Wrapper for _performance_grid() that creates a nice plot of the dataset
+
+    if len(shows) == 0:
+        if not silent:
+            print('create_performance_grid_chart: error: nothing to plot')
+        return()
+
+    # Performance grids don't really have meaning for school shows, so we
+    # need to restrict to public
+    bad = shows[shows['Audience'].isin(['Unknown', 'School'])]
+    if (len(bad) > 0):
+        if not silent:
+            print('create_performance_grid_chart: warning: chart only valid for public shows. Dropping all others...')
+            print('    Number dropped: ' + str(len(bad)) + ' of ' + str(len(shows)))
+        shows = shows[shows['Audience'] == 'Public']
+
+    arr = _performance_grid(data, shows, relative=relative, type=type)
+
+    if dynamic_range: # Find the range where we actually have shows
+        mask = np.all(np.isnan(arr), axis=1)
+        minFinite = np.where(mask == False)[0][0]
+        maxFinite = np.where(mask == False)[0][-1]
+    else: # Include the whole potential range
+        minFinite = 0
+        maxFinite = 23
+
+    chartRange = np.arange(minFinite, maxFinite+1, 1)
+
+
+    yticklabels = []
+    for time in chartRange:
+        if time == 0:
+            yticklabels.append('12 AM')
+        elif time < 12:
+            yticklabels.append(str(time) + ' AM')
+        elif time == 12:
+            yticklabels.append(str(time) + ' PM')
+        else:
+            yticklabels.append(str(time-12) + ' PM')
+
+    fig, ax = plt.subplots()
+    names= ', '.join(shows['Description'].unique())
+    dates = ':'.join([str(min(shows['Perf date'].dt.date)), str(max(shows['Perf date'].dt.date))])
+    if (title == '') and (len(names) < 30):
+        ax.set_title(names + ' Performance for ' + dates)
+    else:
+        ax.set_title(title)
+
+    # This cutoff shits the color range to be darker
+    vmin = -0.5*np.nanmax(arr)
+
+    im = ax.imshow(arr, aspect='auto', cmap=plt.get_cmap('Greens'),
+                    vmin=vmin)
+    ax.set_xticks(np.arange(7))
+    ax.set_yticks(chartRange)
+    ax.set_ylim([maxFinite+1, minFinite-1])
+    ax.spines["bottom"].set_visible(False)
+    ax.spines['top'].set_visible(False)
+    ax.spines['left'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+
+    ax.set_xticklabels(['Mon', 'Tues', 'Wed','Thurs', 'Fri', 'Sat', 'Sun'])
+    ax.set_yticklabels(yticklabels)
+
+    ax.grid(False)
+
+    for i in range(24):
+        for j in range(7):
+            if np.isfinite(arr[i,j]):
+                if relative:
+                    temp_str = str(int(round(100*arr[i, j])))
+                else:
+                    temp_str = str(arr[i,j])
+                text = ax.text(j, i, temp_str, ha="center", va="center", color="w")
+
+    if relative:
+        temp_label = 'Higher numbers mean better relative performance'
+    else:
+        temp_label = 'Numbers are median ' + type.lower() + ' for that block over the given date range'
+    ax.annotate(temp_label,(.1, .02),
+                xycoords='figure fraction',
+                fontsize='medium')
+
+    if filename != '':
+        fig.savefig(filename, dpi=300)
+
+    return(fig)
+
 
 def create_dashboard_chart(data, type, **kwargs):
 
@@ -1632,6 +1758,7 @@ def _preset_models(data, name, list=False, new_err=False):
                            ('Give Back Game Night', '2018-08-18')],
 
               'lecture':  [
+                           ('Lecture Series', '2019-11-11'),
                            ('Lecture Series', '2019-09-16'),
                            ('Lecture Series', '2019-04-15'),
                            ('Lecture Series', '2019-05-13'),
@@ -2189,6 +2316,9 @@ class ttAccessor(object):
     def fix_names(self):
         self._obj = fix_names(self._obj)
         return(self._obj)
+
+    def create_performance_grid_chart(self, shows, **kwargs):
+        return(create_performance_grid_chart(self._obj, shows, **kwargs))
 
     def get_member_data(self, **kwargs):
         return(get_member_data(self._obj, **kwargs))
