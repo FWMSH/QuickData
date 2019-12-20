@@ -486,39 +486,146 @@ def create_yoy_chart(data, **kwargs):
 
     return(plt.gcf())
 
-def _performance_grid(data, shows, relative=True, type='Tickets'):
+def _performance_grid(shows, relative=False, silent=False,
+                      type='Tickets', threshold=0):
 
     # Function to return 24x7 ndarray that gives the perforamce of all
     # the shows contained in the DataFrame shows. If relative=True,
     # the performance is scaled [0:1], otherwise it is the median tickets
     # sold for a show in that time slot.
-    # Type must be a column in the DataFrame, typically "Tickets" or "Revenue"
+    # Type must be "Tickets" or "Revenue"
 
-    temp = shows.copy()
+    # Make sure we have something to operate on
+    if len(shows) == 0:
+        if not silent:
+            print('_performance_grid: warning: all slots excluded by threshold: error: DataFrame is emoty!')
+
+        count_arr = np.zeros((24,7))
+        arr = np.empty((24, 7))
+        arr[:] = np.nan
+        combo_arr = np.array([arr, count_arr])
+        return(combo_arr)
+
+    temp = shows.copy()[['Perf date', 'Tickets', 'Revenue']]
 
     temp['Hour'] = temp['Perf date'].dt.round('H').dt.hour
     temp['Weekday'] = temp['Perf date'].dt.weekday
 
-    grouped = temp.groupby(['Weekday', 'Hour']).median()
+    grouped = temp.groupby(['Weekday', 'Hour'])
+    count = grouped['Tickets'].count()
+
+    grouped_med = grouped.median()
 
     # Build the ndarray
     arrays = [np.repeat(np.arange(7), 24), 7*list(range(24))]
     index = pd.MultiIndex.from_arrays(arrays, names=('Weekday', 'Hour'))
 
-    arr = grouped[type].reindex(index).unstack().transpose().to_numpy()
+    arr = grouped_med[type].reindex(index).unstack().transpose().to_numpy()
+    count_arr = np.nan_to_num(count.reindex(index).unstack().transpose().to_numpy())
+
+    # Eliminate values for cells that fall below the threshold
+    arr[count_arr < threshold] = np.nan
+    count_arr[count_arr < threshold] = 0
+    if (np.nansum(arr) == 0) and (not silent):
+        print('_performance_grid: warning: all slots excluded by threshold')
 
     if relative:
         arr /= np.nanmax(arr)
 
-    return(arr)
+    combo_arr = np.array([arr, count_arr]) # Layer zero is the grid, layer 1 is the number of shows in each grid cell
 
-def create_performance_grid_chart(data, shows, relative=True,
+    return(combo_arr)
+
+def _find_performance_grid_overlap(grids):
+
+    # Function to find show slots that overlap between each of performance
+    # grids provided in the list grids.
+
+    # Make sure we've gotten a grid of the right size. Should be (2, 24, 7)
+    for grid in grids:
+        if np.shape(grid) != (2, 24, 7):
+            print("_find_performance_grid_overlap: error: must provide the full output of _performance_grid()")
+            null_result = np.empty((24,7))
+            null_result[:] = np.nan
+            return(null_result) # Return an array showing no overlap
+
+    # We want to use the grid layer (layer zero)
+    layer_0 = [x[0] for x in grids]
+
+    overlap = np.isfinite(sum(layer_0)) # Only cells where every grid in not nan will return a finite value
+
+    return(overlap)
+
+def estimate_show_value(shows, type='Tickets'):
+
+    # Function to estimate the relative values of shows in the DataFrame shows.
+    # Inteligently varies the comparison threshold to find the optimal
+    # comparison.
+
+    threshold = 0
+    max_comp = -1
+    max_names = []
+    max_values = []
+    while True:
+        names, values, comp_size = _calc_show_value(shows, type=type, threshold=threshold, silent=True)
+        if comp_size > max_comp:
+            max_comp = comp_size
+            max_names = names
+            max_values = values
+            threshold += 1
+        else: # We've found where the number of compared cells trails off
+            break
+
+    result = pd.DataFrame()
+    result['Description'] = max_names
+    result['Relative value'] = max_values
+
+    print('Number of comparisons made:', max_comp)
+    return(result.sort_values('Relative value', ascending=False))
+
+def _calc_show_value(shows, type='Tickets', threshold=0, silent=False):
+
+    # Function to compare sales for shows with overlapping time
+    # slots and estimate their relative value. shows should be
+    # a DataFrame resulting from a search()
+
+    show_names = shows['Description'].unique()
+
+    grid_list = []
+    for show in show_names:
+        slice = shows[shows['Description'] == show]
+        grid = _performance_grid(slice, type=type, threshold=threshold,
+                                    relative=False, silent=silent)
+        grid_list.append(grid)
+
+    overlap = _find_performance_grid_overlap(grid_list)
+
+    # This is a lower bound on how many total perforamnces we're comparing.
+    # It multiplies the threshold by the number of cells that mean that
+    # threshold.
+    min_overlap_num = len(np.where(overlap == True)[0]) * threshold
+
+    # Find the mean value of all the cells for a given show that overlap
+    mean_value = []
+    for i in range(len(show_names)):
+        mean_value.append(np.mean(grid_list[i][0][overlap]))
+
+    norm_value = np.round(mean_value / max(mean_value), 2)
+
+    return(show_names, norm_value, min_overlap_num)
+
+def create_performance_grid_chart(shows, relative=False,
                                     type='Tickets', title='',
+                                    threshold=0,
                                     filename='', dynamic_range=True,
                                     silent=False, debug=False):
 
     # Wrapper for _performance_grid() that creates a nice plot of the dataset
+    # Set threshold = n to only display slots with at least n shows in them.
 
+    # Clear the current figure
+
+    # Make sure we have actual data to plot
     if len(shows) == 0:
         if not silent:
             print('create_performance_grid_chart: error: nothing to plot')
@@ -533,7 +640,15 @@ def create_performance_grid_chart(data, shows, relative=True,
             print('    Number dropped: ' + str(len(bad)) + ' of ' + str(len(shows)))
         shows = shows[shows['Audience'] == 'Public']
 
-    arr = _performance_grid(data, shows, relative=relative, type=type)
+    combo_arr = _performance_grid(shows, relative=relative,
+                                    type=type, threshold=threshold,
+                                    silent=silent)
+
+    arr = combo_arr[0]
+    counts = combo_arr[1]
+
+    if (np.nansum(arr) == 0):
+        return()
 
     if dynamic_range: # Find the range where we actually have shows
         mask = np.all(np.isnan(arr), axis=1)
@@ -545,7 +660,7 @@ def create_performance_grid_chart(data, shows, relative=True,
 
     chartRange = np.arange(minFinite, maxFinite+1, 1)
 
-
+    # Generate an English label for each hour to be plotted
     yticklabels = []
     for time in chartRange:
         if time == 0:
@@ -557,6 +672,7 @@ def create_performance_grid_chart(data, shows, relative=True,
         else:
             yticklabels.append(str(time-12) + ' PM')
 
+    # Setup for the plot
     fig, ax = plt.subplots()
     names= ', '.join(shows['Description'].unique())
     dates = ':'.join([str(min(shows['Perf date'].dt.date)), str(max(shows['Perf date'].dt.date))])
@@ -568,8 +684,11 @@ def create_performance_grid_chart(data, shows, relative=True,
     # This cutoff shits the color range to be darker
     vmin = -0.5*np.nanmax(arr)
 
+    # Do the plotting itself
     im = ax.imshow(arr, aspect='auto', cmap=plt.get_cmap('Greens'),
                     vmin=vmin)
+
+    # Format the plot
     ax.set_xticks(np.arange(7))
     ax.set_yticks(chartRange)
     ax.set_ylim([maxFinite+1, minFinite-1])
@@ -577,12 +696,11 @@ def create_performance_grid_chart(data, shows, relative=True,
     ax.spines['top'].set_visible(False)
     ax.spines['left'].set_visible(False)
     ax.spines['right'].set_visible(False)
-
     ax.set_xticklabels(['Mon', 'Tues', 'Wed','Thurs', 'Fri', 'Sat', 'Sun'])
     ax.set_yticklabels(yticklabels)
-
     ax.grid(False)
 
+    # Loop over each "pixel" in the plotted grid and annotate with its value.
     for i in range(24):
         for j in range(7):
             if np.isfinite(arr[i,j]):
@@ -591,20 +709,23 @@ def create_performance_grid_chart(data, shows, relative=True,
                 else:
                     temp_str = str(arr[i,j])
                 text = ax.text(j, i, temp_str, ha="center", va="center", color="w")
+                text2 = ax.text(j+.47, i+.47, str(int(counts[i,j])), ha="right",
+                                va="bottom", color="w", fontsize='xx-small')
 
+    # Add key at bottom
     if relative:
-        temp_label = 'Higher numbers mean better relative performance'
+        temp_label = 'Large numbers show relative performance (100=best)\nSmall numbers are the number of shows in that time slot'
     else:
-        temp_label = 'Numbers are median ' + type.lower() + ' for that block over the given date range'
-    ax.annotate(temp_label,(.1, .02),
+        temp_label = 'Large numbers are median ' + type.lower() + ' for that time slot over the given date range\nSmall numbers are the number of shows in that time slot'
+    ax.annotate(temp_label,(.1, .01),
                 xycoords='figure fraction',
-                fontsize='medium')
+                fontsize='small')
 
+    # Save to file if desired
     if filename != '':
         fig.savefig(filename, dpi=300)
 
     return(fig)
-
 
 def create_dashboard_chart(data, type, **kwargs):
 
@@ -1049,13 +1170,13 @@ def resolve_string_date(date):
                 nd = pd.to_datetime(date)
                 dates.append(pd.to_datetime(nd))
             except:
-                print('resolve_string_date: warning : date "' + date + '" is not valid and has been ignored')
+                print('resolve_string_date: warning: date "' + date + '" is not valid and has been ignored')
 
 
     if len(dates) < 3:
         return(pd.to_datetime(dates))
     else:
-        print('resolve_string_date: Error: Too many dates!')
+        print('resolve_string_date: error: Too many dates!')
         return(pd.to_datetime([]))
 
 def _expand_omni_alias(alias):
@@ -2131,9 +2252,6 @@ def create_projection_chart(data, model, name, perf_date,
             plt.errorbar(perf_curve['Days before'].iloc[i],
                          proj, yerr=np.array([[proj-low],[high-proj]]),
                          fmt='o', color=pal[0])
-            # plt.errorbar(perf_curve['Days before'].iloc[i]+0.25,
-                         # proj2, yerr=np.array([[proj2-low2],[high2-proj2]]),
-                         # fmt='o', color=pal[2])
 
     if simple:
         full_bool = False
@@ -2318,7 +2436,7 @@ class ttAccessor(object):
         return(self._obj)
 
     def create_performance_grid_chart(self, shows, **kwargs):
-        return(create_performance_grid_chart(self._obj, shows, **kwargs))
+        return(create_performance_grid_chart(shows, **kwargs))
 
     def get_member_data(self, **kwargs):
         return(get_member_data(self._obj, **kwargs))
