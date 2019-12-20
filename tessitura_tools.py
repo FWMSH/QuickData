@@ -673,6 +673,7 @@ def create_performance_grid_chart(shows, relative=False,
             yticklabels.append(str(time-12) + ' PM')
 
     # Setup for the plot
+    sb.set_context('poster')
     fig, ax = plt.subplots()
     names= ', '.join(shows['Description'].unique())
     dates = ':'.join([str(min(shows['Perf date'].dt.date)), str(max(shows['Perf date'].dt.date))])
@@ -725,6 +726,7 @@ def create_performance_grid_chart(shows, relative=False,
     if filename != '':
         fig.savefig(filename, dpi=300)
 
+    plt.close()
     return(fig)
 
 def create_dashboard_chart(data, type, **kwargs):
@@ -1245,7 +1247,7 @@ def search(data, name='', date='', time='', venue='', audience='',
                         max_date = max(date) + pd.to_timedelta('1 day') # Add day to that all times on the given day pass > or <
                         data = data[(data['Perf date'] >= min_date) & (data['Perf date'] <= max_date)]
         else:
-            print('search: Error: date format invalid')
+            print('search: error: date format invalid')
 
     if weekday:
         data = data[data['Perf date'].dt.weekday < 5]
