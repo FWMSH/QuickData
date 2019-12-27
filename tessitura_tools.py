@@ -111,7 +111,7 @@ def add_venue(df):
                  'Backyard Wilderness', 'National Parks Adventure', 'Frozen', 'The Incredibles',
                  'The Polar Express', 'Omni Admission', 'Moana','Apollo 13',
                  'Superpower Dogs', 'Under the Sea', 'Apollo 11', 'Hidden Figures',
-                 'Independence Day', 'Serenity','Fifth Element',
+                 'Independence Day', 'Serenity','Fifth Element', 'Zootopia',
                  'How To Train Your Dragon', 'The Secret Life of Pets', 'Fantastic Beasts',
                  'Back to the Future', 'Spaceballs', 'Bugs!', 'Hocus Pocus', 'Beetlejuice']
     omni = df.loc[df['Description'].isin(omni_list)]
@@ -1190,7 +1190,7 @@ def _expand_omni_alias(alias):
     # available aliases
 
     alias_dict = {'OMNI_DOCUMENTARY': ['Superpower Dogs', 'Under the Sea', 'Tornado Alley', 'Dinosaurs Alive','Jerusalem','Lewis & Clark: Great Journey', 'Born to be Wild','Dolphins', 'Apollo 11','D-Day: Normandy 1944','Dream Big','Backyard Wilderness','National Parks Adventure','Pandas','Coral Reef Adventure',"America's Musical Journey", 'Flight of the Butterflies', 'Bugs!'],
-                  'OMNI_FEATURE': ['Back to the Future','Spaceballs','Jaws','Apollo 13', 'Independence Day', 'Serenity','Fifth Element', 'Hidden Figures','Fantastic Beasts','The Incredibles', 'How To Train Your Dragon','The Secret Life of Pets', 'Frozen','Moana', 'The Polar Express', 'Coco', 'Night at the Museum','Star Wars VIII: The Last Jedi', 'Rolling Stones at the Max', 'Beetlejuice', 'Hocus Pocus'],
+                  'OMNI_FEATURE': ['Back to the Future','Spaceballs','Jaws','Apollo 13', 'Independence Day', 'Serenity','Fifth Element', 'Hidden Figures','Fantastic Beasts','The Incredibles', 'How To Train Your Dragon','The Secret Life of Pets', 'Frozen','Moana', 'The Polar Express', 'Coco', 'Night at the Museum','Star Wars VIII: The Last Jedi', 'Rolling Stones at the Max', 'Beetlejuice', 'Hocus Pocus', 'Zootopia'],
                   'OMNI_OTHER': ['Omni Admission']
                 }
 
@@ -1571,7 +1571,8 @@ def project_sales_with_fit(data, model, name, date,
     # This function projects sales by fitting the model to the sales path
     # so far. It's a bit slower than project_sales, and *much* slower if
     # the model must also be computed (requires new_err).
-    # If day != 1000, the projection will be based only on days up to that day (used when making the projection graph).
+    # If day != 1000, the projection will be based only on days up to that day
+    # (used when making the projection graph).
 
     if isinstance(model, str):
         model = data.tt.get_model(model)
